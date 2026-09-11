@@ -29,16 +29,16 @@ public struct HTMLBlockExtractor {
     public struct Options {
         /// Maps an `<img src>` (as written in the document) to a stored image
         /// reference such as `images/ab12.jpg`. Nil result means "skip".
-        public var imageResolver: (@Sendable (String) -> String?)?
+        public var imageResolver: ((String) -> String?)?
         /// Id assigned to the first emitted block.
         public var firstBlockID: Int = 0
         /// Receives non-fatal problems (missing images, unknown encodings).
-        public var onWarning: (@Sendable (String) -> Void)?
+        public var onWarning: ((String) -> Void)?
 
         public init(
-            imageResolver: (@Sendable (String) -> String?)? = nil,
+            imageResolver: ((String) -> String?)? = nil,
             firstBlockID: Int = 0,
-            onWarning: (@Sendable (String) -> Void)? = nil
+            onWarning: ((String) -> Void)? = nil
         ) {
             self.imageResolver = imageResolver
             self.firstBlockID = firstBlockID

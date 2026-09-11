@@ -308,67 +308,36 @@ public extension GeminiResponseParser {
 
     /// Best-effort extraction of the model list.
     ///
-    /// The exact shape of `body[15]` is not documented by any capture we have,
-    /// so this scans for the stable parts — a 16-hex-character id and a nearby
-    /// human label — and inherits `capacity`/`number` from the matching preset
-    /// because those two fields are positional and cannot be guessed. Anything
-    /// the scan cannot resolve is left for the manual override in Settings.
+    /// The exact shape of `body[15]` is not documented by any capture we have, so
+    /// this walks the tree and treats any array that contains a 16-hex-character
+    /// id as one model entry. `capacity` and `number` are positional and cannot
+    /// be guessed, so they come from the matching preset; the label from the RPC
+    /// wins because it is what the account actually calls the model.
     static func modelList(from value: JSONValue, presets: [GeminiModel]) -> [GeminiModel] {
         var models: [GeminiModel] = []
         var seen = Set<String>()
 
         func visit(_ node: JSONValue) {
             guard let entries = node.arrayValue else { return }
-            for entry in entries {
-                guard let fields = entry.arrayValue else { continue }
-                var id: String?
-                var label: String?
-                var capacity: Int?
-                var number: Int?
-                for field in fields {
-                    switch field {
-                    case .string(let text):
-                        if id == nil, isModelId(text) {
-                            id = text
-                        } else if label == nil, isPlausibleLabel(text) {
-                            label = text
-                        }
-                    case .int(let numberValue):
-                        // Positional guesses, replaced by preset values below.
-                        if capacity == nil, numberValue > 0, numberValue <= 64 {
-                            capacity = numberValue
-                        } else if number == nil, numberValue > 0, numberValue <= 64 {
-                            number = numberValue
-                        }
-                    case .array(let nested):
-                        if id == nil, let found = firstModelId(in: nested) { id = found }
-                    case .null, .bool:
-                        break
-                    }
-                }
-                if let id, !seen.contains(id) {
-                    seen.insert(id)
-                    let preset = presets.first { $0.id == id }
-                    models.append(GeminiModel(
-                        id: id,
-                        label: label ?? preset?.label ?? id,
-                        capacity: preset?.capacity ?? capacity ?? 12,
-                        number: preset?.number ?? number ?? 1))
-                } else if id == nil {
-                    // Grouping arrays: recurse one level.
-                    for field in fields where field.arrayValue != nil {
-                        visit(field)
-                    }
-                }
-            }
-        }
 
-        func firstModelId(in values: [JSONValue]) -> String? {
-            for field in values {
-                if case .string(let text) = field, isModelId(text) { return text }
-                if let nested = field.arrayValue, let found = firstModelId(in: nested) { return found }
+            let strings = entries.compactMap { $0.stringValue }
+            if let id = strings.first(where: isModelId) {
+                guard seen.insert(id).inserted else { return }
+                let label = strings.first { $0 != id && isPlausibleLabel($0) }
+                let ints = entries.compactMap { entry -> Int? in
+                    guard case .int(let number) = entry, (1...64).contains(number) else { return nil }
+                    return number
+                }
+                let preset = presets.first { $0.id == id }
+                models.append(GeminiModel(
+                    id: id,
+                    label: label ?? preset?.label ?? id,
+                    capacity: preset?.capacity ?? ints.first ?? 12,
+                    number: preset?.number ?? (ints.count > 1 ? ints[1] : ints.first ?? 1)))
+                return
             }
-            return nil
+
+            for entry in entries { visit(entry) }
         }
 
         visit(value)
@@ -441,15 +410,20 @@ public extension GeminiResponseParser {
             raw: value)
     }
 
+    private static func collect(asDouble: Double, fractions: inout [Double], ratios: inout [Double]) {
+        if asDouble > 0, asDouble <= 1 {
+            fractions.append(asDouble)
+        } else if asDouble > 1, asDouble <= 100 {
+            ratios.append(asDouble)
+        }
+    }
+
     private static func collectNumbers(_ value: JSONValue, fractions: inout [Double], ratios: inout [Double]) {
         switch value {
         case .int(let number):
-            let asDouble = Double(number)
-            if asDouble > 0, asDouble <= 1 {
-                fractions.append(asDouble)
-            } else if asDouble > 1, asDouble <= 100 {
-                ratios.append(asDouble)
-            }
+            collect(asDouble: Double(number), fractions: &fractions, ratios: &ratios)
+        case .double(let number):
+            collect(asDouble: number, fractions: &fractions, ratios: &ratios)
         case .array(let values):
             for child in values { collectNumbers(child, fractions: &fractions, ratios: &ratios) }
         default:

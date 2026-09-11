@@ -11,7 +11,8 @@ Payload/
 # SwiftPM
 .build/
 .swiftpm/
-Package.resolved
+# Package.resolved is committed on purpose: CI must resolve the same
+# ZIPFoundation revision as local development, not whatever is newest.
 
 # XcodeGen-generated
 App/Resources/Info.plist
@@ -19,3 +20,6 @@ App/Resources/Info.plist
 # Misc
 .DS_Store
 *.swp
+
+# SwiftPM scratch directories used during development
+.build*/

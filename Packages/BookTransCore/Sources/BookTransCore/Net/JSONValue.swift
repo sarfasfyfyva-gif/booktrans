@@ -7,8 +7,10 @@ public indirect enum JSONValue: Codable, Equatable, Sendable {
     case null
     case bool(Bool)
     case int(Int)
+    case double(Double)
     case string(String)
     case array([JSONValue])
+    case object([String: JSONValue])
 
     public func encode(to encoder: Encoder) throws {
         var single = encoder.singleValueContainer()
@@ -16,8 +18,10 @@ public indirect enum JSONValue: Codable, Equatable, Sendable {
         case .null: try single.encodeNil()
         case .bool(let value): try single.encode(value)
         case .int(let value): try single.encode(value)
+        case .double(let value): try single.encode(value)
         case .string(let value): try single.encode(value)
         case .array(let values): try single.encode(values)
+        case .object(let values): try single.encode(values)
         }
     }
 
@@ -39,8 +43,10 @@ public indirect enum JSONValue: Codable, Equatable, Sendable {
         if single.decodeNil() { self = .null; return }
         if let value = try? single.decode(Bool.self) { self = .bool(value); return }
         if let value = try? single.decode(Int.self) { self = .int(value); return }
+        if let value = try? single.decode(Double.self) { self = .double(value); return }
         if let value = try? single.decode(String.self) { self = .string(value); return }
         if let value = try? single.decode([JSONValue].self) { self = .array(value); return }
+        if let value = try? single.decode([String: JSONValue].self) { self = .object(value); return }
         self = .null
     }
 
@@ -64,6 +70,24 @@ public indirect enum JSONValue: Codable, Equatable, Sendable {
     public var arrayValue: [JSONValue]? {
         if case .array(let values) = self { return values }
         return nil
+    }
+
+    public var doubleValue: Double? {
+        switch self {
+        case .double(let value): return value
+        case .int(let value): return Double(value)
+        default: return nil
+        }
+    }
+
+    public var objectValue: [String: JSONValue]? {
+        if case .object(let values) = self { return values }
+        return nil
+    }
+
+    /// Convenience for payloads that are objects keyed by name.
+    public subscript(key: String) -> JSONValue? {
+        objectValue?[key]
     }
 
     public var isNull: Bool {

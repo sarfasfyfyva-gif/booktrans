@@ -291,6 +291,11 @@ public enum FB2Parser {
                 return
             }
 
+            if name == "description" || name == "title-info" {
+                handleMetadataStart(tag)
+                return
+            }
+
             switch name {
             case "body":
                 bodyDepth += 1
@@ -324,11 +329,14 @@ public enum FB2Parser {
 
             if let kind = FB2Parser.blockKinds[name] {
                 guard !tag.selfClosing else { return }
+                // A heading often wraps its lines in <p>, and those paragraphs
+                // are part of the heading rather than body text.
+                let inherited = inheritedKind(for: name)
                 // A new block ends the previous one, which keeps the block list
                 // in document order for shapes like <title><p>…</p></title>.
                 closeBlock()
                 ensureChapter()
-                contexts.append(BlockContext(element: name, kind: kind))
+                contexts.append(BlockContext(element: name, kind: inherited ?? kind))
                 elementStack.append(name)
                 return
             }
@@ -393,6 +401,14 @@ public enum FB2Parser {
             contexts.append(BlockContext(element: "", kind: .paragraph))
             contexts[contexts.count - 1].text += value
             contexts[contexts.count - 1].html += Block.escape(value)
+        }
+
+        /// `<p>` and `<v>` inside a `<title>` or `<subtitle>` continue that heading.
+        private func inheritedKind(for element: String) -> BlockKind? {
+            guard element == "p" || element == "v" else { return nil }
+            guard let parent = contexts.last else { return nil }
+            guard parent.element == "title" || parent.element == "subtitle" else { return nil }
+            return parent.kind
         }
 
         private mutating func handleImage(_ tag: MarkupTag) {

@@ -35,7 +35,7 @@ public struct GeminiModel: Codable, Sendable, Hashable, Identifiable {
 /// Decode-only: the on-disk representation is the single source of truth and is
 /// edited by hand after a protocol capture, so there is no encoder to keep in
 /// sync with the key mapping below.
-public struct GeminiConfig: Decodable, Sendable {
+public struct GeminiConfig: Decodable, Sendable, Equatable {
     public var appURL: String
     public var generateURL: String
     public var batchexecuteURL: String
@@ -127,6 +127,26 @@ public struct GeminiConfig: Decodable, Sendable {
 }
 
 // MARK: - Loading
+
+/// The configuration used when the bundled resource cannot be read. It is a
+/// literal copy of `Resources/gemini-web.json`; `GeminiProtocolTests` asserts the
+/// two are equal so they cannot drift apart.
+public extension GeminiConfig {
+    static let lastResort = GeminiConfig(
+        appURL: "https://gemini.google.com/app",
+        generateURL: "https://gemini.google.com"
+            + "/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate",
+        batchexecuteURL: "https://gemini.google.com/_/BardChatUi/data/batchexecute",
+        rotateCookiesURL: "https://accounts.google.com/RotateCookies",
+        rpcStatus: "otAQ7b", rpcUsage: "jSf9Qc", rpcQuota: "qpEbW",
+        models: [
+            GeminiModel(id: "56fdd199312815e2", label: "Flash (подписка)", capacity: 4, number: 1),
+            GeminiModel(id: "e6fa609c3fa255c0", label: "Pro (подписка)", capacity: 4, number: 3),
+            GeminiModel(id: "8c46e95b1a07cecc", label: "Flash Lite (подписка)", capacity: 4, number: 6),
+            GeminiModel(id: "fbb127bbb056c959", label: "Flash (free)", capacity: 1, number: 1),
+        ],
+        defaultModel: "56fdd199312815e2")
+}
 
 public enum GeminiConfigLoader {
     /// Bundled defaults shipped inside the package.

@@ -19,7 +19,7 @@ public enum HTMLEntities {
         "ldquo": "\u{201C}", "rdquo": "\u{201D}", "laquo": "\u{00AB}", "raquo": "\u{00BB}",
         "lsaquo": "\u{2039}", "rsaquo": "\u{203A}", "prime": "\u{2032}", "Prime": "\u{2033}",
         // Punctuation
-        "hellip": "\u{2026}", "middot": "\u{00B7}", "bull": "\u{2022}", "bull;": "\u{2022}",
+        "hellip": "\u{2026}", "middot": "\u{00B7}", "bull": "\u{2022}",
         "dagger": "\u{2020}", "Dagger": "\u{2021}", "sect": "\u{00A7}", "para": "\u{00B6}",
         "copy": "\u{00A9}", "reg": "\u{00AE}", "trade": "\u{2122}", "deg": "\u{00B0}",
         "plusmn": "\u{00B1}", "times": "\u{00D7}", "divide": "\u{00F7}",
@@ -67,6 +67,7 @@ public enum HTMLEntities {
         guard !body.isEmpty else { return nil }
         if body.hasPrefix("#") {
             let digits = body.dropFirst()
+            guard !digits.isEmpty else { return nil }
             let value: UInt32?
             if digits.first == "x" || digits.first == "X" {
                 value = UInt32(digits.dropFirst(), radix: 16)

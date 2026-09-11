@@ -70,9 +70,7 @@ public enum EncodingDetect {
         }
 
         if let name = declaredEncodingName(in: data) {
-            if let encoding = encoding(named: name), let text = String(data: data, encoding: encoding) {
-                return Decoded(text: text, encodingName: name.lowercased())
-            }
+            if let decoded = decodeWithName(name, data: data) { return decoded }
             CoreLog.warn("unsupported or mismatched declared encoding '\(name)', falling back")
         }
 
@@ -83,6 +81,21 @@ public enum EncodingDetect {
             return Decoded(text: text, encodingName: "windows-1251 (fallback)")
         }
         return nil
+    }
+
+    /// Decodes using the declared name. windows-1251 goes through the local table
+    /// rather than `String.Encoding`: Foundation's ICU converter does not carry
+    /// that codepage on Linux, so relying on it would silently route every
+    /// Russian FB2 file through the fallback path and mis-report the encoding.
+    static func decodeWithName(_ name: String, data: Data) -> Decoded? {
+        let lower = name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        if ["windows-1251", "cp1251", "win-1251", "x-cp1251"].contains(lower) {
+            return Windows1251.decode(data).map { Decoded(text: $0, encodingName: lower) }
+        }
+        guard let encoding = encoding(named: lower),
+              let text = String(data: data, encoding: encoding)
+        else { return nil }
+        return Decoded(text: text, encodingName: lower)
     }
 }
 

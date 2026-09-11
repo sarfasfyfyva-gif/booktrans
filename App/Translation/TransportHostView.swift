@@ -39,10 +39,10 @@ struct GeminiLoginSheet: View {
                     Button {
                         Task {
                             isWorking = true
-                            await app.gemini?.refreshSession(force: true)
-                            await app.gemini?.refreshAccountStatus()
+                            await app.gemini.refreshSession(force: true)
+                            await app.gemini.refreshAccountStatus()
                             isWorking = false
-                            if app.gemini?.signInState == .signedIn { dismiss() }
+                            if app.gemini.signInState == .signedIn { dismiss() }
                         }
                     } label: {
                         if isWorking {

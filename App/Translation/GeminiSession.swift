@@ -56,7 +56,7 @@ final class GeminiSession {
         self.paths = paths
         self.transport = transport
         self.config = GeminiConfigLoader.resolve(override: FileStore.readData(paths.geminiConfigOverride))
-            ?? GeminiConfig.fallback
+            ?? GeminiConfig.lastResort
         self.models = config.models
         let stored = UserDefaults.standard.string(forKey: Self.modelDefaultsKey)
         self.selectedModelId = stored ?? config.defaultModel
@@ -70,7 +70,7 @@ final class GeminiSession {
     /// protocol capture.
     func reloadConfig() {
         config = GeminiConfigLoader.resolve(override: FileStore.readData(paths.geminiConfigOverride))
-            ?? GeminiConfig.fallback
+            ?? GeminiConfig.lastResort
         models = mergedModels(rpc: account?.models ?? [], presets: config.models)
         if !models.contains(where: { $0.id == selectedModelId }) {
             selectedModelId = config.defaultModel
@@ -91,19 +91,16 @@ final class GeminiSession {
 
     var hasConfigOverride: Bool { FileStore.exists(paths.geminiConfigOverride) }
 
+    /// The RPC is the source of truth for which models exist and what the account
+    /// calls them; presets only fill in `capacity`/`number` (which are positional
+    /// and cannot be derived) and stand in when the RPC returns nothing.
     private func mergedModels(rpc: [GeminiModel], presets: [GeminiModel]) -> [GeminiModel] {
         guard !rpc.isEmpty else { return presets }
         var result = rpc
         for preset in presets where !result.contains(where: { $0.id == preset.id }) {
             result.append(preset)
         }
-        // Presets carry the labels humans recognise; prefer them when present.
-        return result.map { model in
-            guard let preset = presets.first(where: { $0.id == model.id }) else { return model }
-            var merged = model
-            merged.label = preset.label
-            return merged
-        }
+        return result
     }
 
     // MARK: - Session
@@ -396,23 +393,4 @@ enum GeminiSessionError: LocalizedError {
         default: return ""
         }
     }
-}
-
-extension GeminiConfig {
-    /// Used only if the bundled resource cannot be read, so the app still has a
-    /// working configuration to show on the settings screen.
-    static let fallback = GeminiConfig(
-        appURL: "https://gemini.google.com/app",
-        generateURL: "https://gemini.google.com"
-            + "/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate",
-        batchexecuteURL: "https://gemini.google.com/_/BardChatUi/data/batchexecute",
-        rotateCookiesURL: "https://accounts.google.com/RotateCookies",
-        rpcStatus: "otAQ7b", rpcUsage: "jSf9Qc", rpcQuota: "qpEbW",
-        models: [
-            GeminiModel(id: "56fdd199312815e2", label: "Flash (подписка)", capacity: 4, number: 1),
-            GeminiModel(id: "e6fa609c3fa255c0", label: "Pro (подписка)", capacity: 4, number: 3),
-            GeminiModel(id: "8c46e95b1a07cecc", label: "Flash Lite (подписка)", capacity: 4, number: 6),
-            GeminiModel(id: "fbb127bbb056c959", label: "Flash (free)", capacity: 1, number: 1),
-        ],
-        defaultModel: "56fdd199312815e2")
 }

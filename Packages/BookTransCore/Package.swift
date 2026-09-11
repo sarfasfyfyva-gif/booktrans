@@ -25,7 +25,12 @@ let package = Package(
         ),
         .testTarget(
             name: "BookTransCoreTests",
-            dependencies: ["BookTransCore"],
+            dependencies: [
+                "BookTransCore",
+                // Needed by the unpacker tests, which build real archives to
+                // prove the traversal guard runs before anything is written.
+                .product(name: "ZIPFoundation", package: "ZIPFoundation"),
+            ],
             resources: [.copy("Fixtures")]
         ),
     ]
