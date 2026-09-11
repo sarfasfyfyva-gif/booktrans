@@ -37,6 +37,20 @@
    прямо просит перейти на LocalDevVPN.
 4. iPhone с iOS 26.5, кабель, доверие компьютеру.
 
+## Проверено на этой машине (2026-09-12)
+
+|Что|Состояние|
+|---|---|
+|Apple Mobile Device Support|установлен, служба `Apple Mobile Device Service` запущена|
+|iPhone|подключён и виден: `Apple iPhone`, `VID_05AC&PID_12A8`|
+|iloader|не установлен|
+|MSI iloader|`Error 1925 — insufficient privileges`: установка только с правами администратора, нужен клик в UAC|
+|iloader v2.3.3, `iloader-windows-x64.msi`|скачан, SHA-256 `9dbf05bd45a67c94ef80dcb487f20972b4f0dda25e0a49c2a177dbbe9d3933d8`|
+|`BookTrans.ipa`|лежит в `C:\Users\Gennadiy\Downloads\BookTrans\`|
+
+Это значит: **шаг «Install SideStore» в iloader делает пользователь** — вход в Apple ID
+и 2FA автоматизировать нельзя, и пароль не должен покидать вас.
+
 ## Первая установка
 
 1. Установите iTunes и iloader на Windows.
