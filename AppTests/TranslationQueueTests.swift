@@ -321,11 +321,14 @@ final class TranslationQueueTests: XCTestCase {
         books.markBatch(bookId: bookId, index: 1, status: .failed, error: "x")
         queue.start(bookId: bookId)
 
-        await wait(until: { [self] in queue.status == .idle && !queue.isRunning })
+        await wait(until: { [self] in !queue.isRunning })
 
         let finished = try plan(bookId)
         XCTAssertEqual(finished.batches[0].status, .done)
         XCTAssertEqual(finished.batches[1].status, .failed, "a failed batch is not retried unasked")
-        XCTAssertEqual(finished.batches[2].status, .done)
+        XCTAssertEqual(finished.batches[2].status, .done,
+                       "the loop must work past a failed batch")
+        XCTAssertEqual(queue.status, .failed,
+                       "the run reports the failure rather than claiming success")
     }
 }
