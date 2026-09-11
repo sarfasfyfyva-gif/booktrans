@@ -167,12 +167,14 @@ final class AppState {
         applyIdleTimerSetting()
         switch phase {
         case .active:
-            break
+            // Coming back from the background continues a translation that the
+            // scene change stopped; a pause the user asked for is left alone.
+            queue.resumeAfterScenePause()
         default:
             // iOS suspends the app, so translation cannot continue; stop after
             // the request that is already in flight.
             CoreLog.info("scene became \(String(describing: phase)); pausing translation")
-            queue.pause()
+            queue.pause(reason: .scene)
         }
     }
 

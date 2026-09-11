@@ -17,12 +17,21 @@ final class TranslationQueue {
     /// because the user may flip the VPN back on at any moment.
     static let connectivityRetryDelay: TimeInterval = 60
 
+    /// Backoff actually used. Injectable so tests do not wait real seconds.
+    var retrySchedule: [Duration] = TranslationQueue.retryDelays
+    /// Overrides the configured quota wait. Injectable for the same reason.
+    var quotaRetryDelayOverride: TimeInterval?
+    /// Overrides the connectivity retry wait. Injectable for the same reason.
+    var connectivityRetryDelayOverride: TimeInterval?
+
     private(set) var status: QueueStatus = .idle
     private(set) var message: String?
     private(set) var activeBookId: String?
     private(set) var activeBatchIndex: Int?
     /// Set by the user or by the scene going inactive.
     private(set) var isPaused = false
+    /// True when the current stop was caused by the scene, not by the user.
+    private(set) var pausedForScene = false
 
     private let paths: BookPaths
     private let books: BookStore
@@ -76,19 +85,47 @@ final class TranslationQueue {
         }
     }
 
+    /// Why the queue stopped making requests.
+    enum PauseReason {
+        /// The user pressed a pause button. Survives a relaunch: only an explicit
+        /// resume starts it again.
+        case user
+        /// The app went inactive. iOS suspends us anyway, so this is not a
+        /// decision — the persisted state stays "unfinished" and the next launch
+        /// continues automatically.
+        case scene
+    }
+
     /// Stops after the request that is already in flight.
-    func pause() {
+    func pause(reason: PauseReason = .user) {
         isPaused = true
-        if let bookId = activeBookId {
+        pausedForScene = (reason == .scene)
+        guard let bookId = activeBookId else { return }
+        switch reason {
+        case .user:
             setStatus(.paused, message: "Пауза", bookId: bookId)
             persistState(bookId: bookId, status: .paused, message: "Пауза")
+        case .scene:
+            // Deliberately no persist and no status change: the worker is idle
+            // but the book's translation is still unfinished, and state.json
+            // already says `.running` from the last batch.
+            CoreLog.info("queue paused because the app became inactive")
         }
+    }
+
+    /// Restarts after the app came back to the foreground, but only if the stop
+    /// was caused by the scene going inactive.
+    func resumeAfterScenePause(bookId: String? = nil) {
+        guard pausedForScene else { return }
+        pausedForScene = false
+        resume(bookId: bookId)
     }
 
     func resume(bookId: String? = nil) {
         let target = bookId ?? activeBookId
         guard let target else { return }
         isPaused = false
+        pausedForScene = false
         start(bookId: target)
     }
 
@@ -169,6 +206,8 @@ final class TranslationQueue {
             guard library.load().contains(where: { $0.id == bookId }) else {
                 CoreLog.info("queue: book \(bookId) is gone from the library, stopping")
                 setStatus(.idle, message: nil, bookId: nil)
+                activeBookId = nil
+                activeBatchIndex = nil
                 return
             }
             if isPaused {
@@ -252,8 +291,14 @@ final class TranslationQueue {
         let failed = plan.batches.filter { $0.status == .failed }.count
         switch reason {
         case .paused:
-            setStatus(.paused, message: "Пауза", bookId: bookId)
-            persistState(bookId: bookId, status: .paused, message: "Пауза")
+            if pausedForScene {
+                // Leave the persisted state as unfinished so the next launch picks
+                // the translation up where it stopped.
+                setStatus(.running, message: nil, bookId: bookId)
+            } else {
+                setStatus(.paused, message: "Пауза", bookId: bookId)
+                persistState(bookId: bookId, status: .paused, message: "Пауза")
+            }
         case .complete:
             if failed > 0 {
                 let text = "Готово, но \(failed) батчей с ошибкой — их можно перезапустить"
@@ -357,10 +402,12 @@ final class TranslationQueue {
                 "batch": String(batch.index),
                 "detail": detail,
             ])
-            return .retryLater(TranslationQueue.connectivityRetryDelay, error, batch)
+            return .retryLater(
+                connectivityRetryDelayOverride ?? TranslationQueue.connectivityRetryDelay,
+                error, batch)
         }
 
-        let index = min(batch.attempts - 1, TranslationQueue.retryDelays.count - 1)
+        let index = min(batch.attempts - 1, max(0, retrySchedule.count - 1))
 
         if batch.attempts >= TranslationQueue.maxAttempts {
             batch.status = .failed
@@ -382,11 +429,11 @@ final class TranslationQueue {
         let delay: TimeInterval
         switch error.kind {
         case .usageLimit, .ipRegion:
-            delay = Double(settings.retryLimitMinutes) * 60
+            delay = quotaRetryDelay
         case .unauthenticated, .unavailable:
             delay = 0
         default:
-            delay = TranslationQueue.retryDelays[index].seconds
+            delay = retrySchedule.isEmpty ? 15 : retrySchedule[index].seconds
         }
         books.updateBatch(bookId: bookId, index: batch.index) { stored in
             stored.status = .pending
@@ -453,6 +500,11 @@ final class TranslationQueue {
         }
     }
 
+    /// How long to wait after a quota or region error before trying again.
+    private var quotaRetryDelay: TimeInterval {
+        quotaRetryDelayOverride ?? Double(settings.retryLimitMinutes) * 60
+    }
+
     private func nextBatchIndex(in plan: BatchPlan) -> Int? {
         plan.batches.first { $0.status == .pending || $0.status == .running }?.index
     }
@@ -463,6 +515,11 @@ final class TranslationQueue {
         self.status = status
         self.message = message
         if let bookId { self.activeBookId = bookId }
+        // Keep the library badge in step with the queue without waiting for the
+        // next finished batch.
+        if let bookId, let plan = books.loadPlan(bookId) {
+            _ = library.refreshCounters(bookId: bookId, plan: plan, status: status)
+        }
     }
 
     private func persistState(

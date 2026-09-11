@@ -45,41 +45,54 @@ struct BookView: View {
         Section("Управление переводом") {
             if let plan {
                 let remaining = plan.batches.filter { $0.status != .done }.count
+                let failed = plan.batches.filter { $0.status == .failed }.count
+
                 if remaining == 0 {
                     Label("Перевод завершён", systemImage: "checkmark.circle")
                         .foregroundStyle(Theme.success)
-                } else if queueActive {
-                    HStack {
-                        Text(app.queue.message ?? "Идёт перевод")
-                            .font(.footnote)
-                            .foregroundStyle(Theme.secondaryText)
-                        Spacer()
-                        ProgressView().controlSize(.small)
-                    }
-                    Button(role: .destructive) {
-                        app.queue.pause()
-                    } label: {
-                        Label("Пауза", systemImage: "pause")
-                    }
                 } else {
-                    Button {
-                        app.queue.start(bookId: bookId)
-                    } label: {
-                        Label(plan.doneCount > 0 ? "Продолжить перевод" : "Начать перевод",
-                              systemImage: "play")
-                    }
-                    if plan.doneCount > 0 {
-                        Text("Осталось батчей: \(remaining)")
+                    switch effectiveStatus {
+                    case .running:
+                        statusRow(spinner: true)
+                        Button(role: .destructive) {
+                            app.queue.pause()
+                        } label: {
+                            Label("Пауза", systemImage: "pause")
+                        }
+
+                    case .waitingQuota:
+                        // The queue retries on its own; say so rather than
+                        // offering a resume the user does not need.
+                        statusRow(spinner: true)
+                        Text("Продолжим автоматически")
                             .font(.caption)
                             .foregroundStyle(Theme.secondaryText)
-                    }
-                }
+                        Button(role: .destructive) {
+                            app.queue.pause()
+                        } label: {
+                            Label("Пауза", systemImage: "pause")
+                        }
 
-                if app.queue.status == .waitingAuth, queueActive {
-                    Button {
-                        showingLogin = true
-                    } label: {
-                        Label("Войти в Gemini", systemImage: "person.crop.circle.badge.exclamationmark")
+                    case .waitingAuth:
+                        statusRow(spinner: false)
+                        Button {
+                            showingLogin = true
+                        } label: {
+                            Label("Войти в Gemini",
+                                  systemImage: "person.crop.circle.badge.exclamationmark")
+                        }
+
+                    case .paused, .idle, .failed:
+                        Button {
+                            app.queue.resume(bookId: bookId)
+                        } label: {
+                            Label(plan.doneCount > 0 ? "Продолжить перевод" : "Начать перевод",
+                                  systemImage: "play")
+                        }
+                        Text("Осталось батчей: \(remaining)"
+                             + (failed > 0 ? ", из них с ошибкой: \(failed)" : ""))
+                            .font(.caption)
+                            .foregroundStyle(failed > 0 ? Theme.danger : Theme.secondaryText)
                     }
                 }
             }
@@ -97,8 +110,24 @@ struct BookView: View {
         }
     }
 
-    private var queueActive: Bool {
-        app.queue.activeBookId == bookId && app.queue.status != .idle && app.queue.status != .failed
+    private func statusRow(spinner: Bool) -> some View {
+        HStack {
+            Text(app.queue.activeBookId == bookId
+                 ? (app.queue.message ?? "Идёт перевод")
+                 : "Состояние из прошлого запуска")
+                .font(.footnote)
+                .foregroundStyle(Theme.secondaryText)
+            Spacer()
+            if spinner { ProgressView().controlSize(.small) }
+        }
+    }
+
+    /// What this book's translation is doing. When the queue is not working on
+    /// this book the stored state is what the user last saw, which is also what
+    /// lets a pause survive a relaunch.
+    private var effectiveStatus: QueueStatus {
+        if app.queue.activeBookId == bookId { return app.queue.status }
+        return app.books.loadState(bookId)?.status ?? .idle
     }
 
     // MARK: - Sections

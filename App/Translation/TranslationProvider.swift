@@ -39,20 +39,27 @@ final class MockTranslationProvider: TranslationProvider {
 
     /// Artificial latency, so the queue's pause and resume paths are exercised.
     var delay: Duration = .milliseconds(120)
-    /// When set, the first `failuresBeforeSuccess` calls throw instead of answering.
+    /// When set, the first `failuresBeforeSuccess` translate calls throw.
     var failuresBeforeSuccess = 0
+    /// Every translate call throws.
+    var alwaysFails = false
+    /// Errors thrown instead of answering, consumed in order. Applied to translate
+    /// requests only, so a test can say "the first translate call fails" without
+    /// having to account for the terminology request that runs before it.
+    var scriptedErrors: [Error] = []
     private var attempts = 0
 
     func complete(prompt: String) async throws -> String {
         if delay > .zero { try? await Task.sleep(for: delay) }
 
-        attempts += 1
-        if attempts <= failuresBeforeSuccess {
-            throw MockError.simulatedFailure(attempt: attempts)
-        }
-
         if prompt.contains("[ФРАГМЕНТ]") {
             return #"{"glossary": [{"term": "ROI", "translation": "рентабельность инвестиций (ROI)"}]}"#
+        }
+
+        if !scriptedErrors.isEmpty { throw scriptedErrors.removeFirst() }
+        attempts += 1
+        if alwaysFails || attempts <= failuresBeforeSuccess {
+            throw MockError.simulatedFailure(attempt: attempts)
         }
 
         let blocks = MockTranslationProvider.blocks(in: prompt)
