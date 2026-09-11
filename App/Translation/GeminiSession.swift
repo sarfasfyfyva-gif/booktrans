@@ -84,11 +84,34 @@ final class GeminiSession {
         ])
     }
 
-    /// Writes the bundled defaults into `Documents/Config/gemini-web.json` so
-    /// the user has something to edit after a protocol capture.
+    /// Writes an editable configuration into `Documents/Config/gemini-web.json`.
+    ///
+    /// Starts from the bundled defaults and adds the header templates at their
+    /// effective values, so the fields that fix a `1052` are visible in the file
+    /// instead of only being described in the docs. An override that is already
+    /// in place is preserved.
     @discardableResult
     func writeEditableConfigCopy() -> Bool {
-        guard let data = GeminiConfigLoader.bundledJSONData() else { return false }
+        guard let bundled = GeminiConfigLoader.bundledJSONData(),
+              var object = (try? JSONSerialization.jsonObject(with: bundled)) as? [String: Any]
+        else { return false }
+
+        let existing = FileStore.readData(paths.geminiConfigOverride)
+            .flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]
+
+        object["modelHeader"] = existing?["modelHeader"]
+            ?? config.modelHeaderTemplate
+            ?? GeminiProtocol.defaultModelHeaderTemplate
+        object["batchModelHeader"] = existing?["batchModelHeader"]
+            ?? config.batchModelHeaderTemplate
+            ?? GeminiProtocol.defaultBatchModelHeaderTemplate
+        object["sessionHeader"] = existing?["sessionHeader"]
+            ?? config.sessionHeaderTemplate
+            ?? GeminiProtocol.defaultSessionHeaderTemplate
+
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+        else { return false }
         return FileStore.writeData(data, to: paths.geminiConfigOverride)
     }
 
@@ -178,7 +201,8 @@ final class GeminiSession {
                 config: config, rpcId: rpcId, sourcePath: sourcePath,
                 bl: wiz.bl, sessionId: wiz.sessionId, reqid: reqid.next()),
             method: "POST",
-            headers: GeminiRequestBuilder.batchExecHeaders(sessionUUID: sessionUUID),
+            headers: GeminiRequestBuilder.batchExecHeaders(
+                config: config, sessionUUID: sessionUUID),
             body: GeminiRequestBuilder.batchExecBody(
                 at: wiz.at,
                 fReq: GeminiRequestBuilder.batchExecFReq(rpcId: rpcId, payload: payload)),
@@ -287,7 +311,8 @@ final class GeminiSession {
         let sessionUUID = GeminiRequestBuilder.newSessionUUID()
         let requestURL = GeminiRequestBuilder.generateURL(
             config: config, bl: wiz.bl, sessionId: wiz.sessionId, reqid: reqid.next())
-        let headers = GeminiRequestBuilder.generateHeaders(model: model, sessionUUID: sessionUUID)
+        let headers = GeminiRequestBuilder.generateHeaders(
+            config: config, model: model, sessionUUID: sessionUUID)
         let body = GeminiRequestBuilder.generateBody(
             at: wiz.at,
             fReq: GeminiRequestBuilder.generateFReq(

@@ -55,12 +55,29 @@ public struct GeminiConfig: Decodable, Sendable, Equatable {
     public var defaultModel: String
     public var promptVersion: Int
 
+    /// Optional overrides for the headers that select the model. These are the
+    /// parameters most likely to be reworked when the web client changes, they
+    /// fail with `1052` when wrong, and a wrong value must be fixable by editing
+    /// this file on the device rather than by rebuilding the app.
+    ///
+    /// Placeholders: `{model}`, `{capacity}`, `{number}`, `{session}`.
+    ///   * `modelHeader`      — `x-goog-ext-525001261-jspb` for generation
+    ///   * `batchModelHeader` — the same header for batchexecute RPCs
+    ///   * `sessionHeader`    — `x-goog-ext-525005358-jspb`; an empty string
+    ///                          omits the header entirely
+    public var modelHeaderTemplate: String?
+    public var batchModelHeaderTemplate: String?
+    public var sessionHeaderTemplate: String?
+
     private enum CodingKeys: String, CodingKey {
         case appURL = "init"
         case generateURL = "generate"
         case batchexecuteURL = "batchexecute"
         case rotateCookiesURL = "rotateCookies"
         case rpc, wizKeys, models, defaultModel, prompts
+        case modelHeaderTemplate = "modelHeader"
+        case batchModelHeaderTemplate = "batchModelHeader"
+        case sessionHeaderTemplate = "sessionHeader"
     }
 
     private enum RPCKeys: String, CodingKey { case status, usage, quota }
@@ -85,6 +102,10 @@ public struct GeminiConfig: Decodable, Sendable, Equatable {
         wizSession = try wiz.decodeIfPresent(String.self, forKey: .session) ?? "FdrFJe"
         wizLang = try wiz.decodeIfPresent(String.self, forKey: .lang) ?? "TuX5cc"
 
+        modelHeaderTemplate = try c.decodeIfPresent(String.self, forKey: .modelHeaderTemplate)
+        batchModelHeaderTemplate = try c.decodeIfPresent(String.self, forKey: .batchModelHeaderTemplate)
+        sessionHeaderTemplate = try c.decodeIfPresent(String.self, forKey: .sessionHeaderTemplate)
+
         models = try c.decodeIfPresent([GeminiModel].self, forKey: .models) ?? []
         defaultModel = try c.decodeIfPresent(String.self, forKey: .defaultModel) ?? models.first?.id ?? ""
         if let prompts = try? c.nestedContainer(keyedBy: PromptKeys.self, forKey: .prompts) {
@@ -99,7 +120,9 @@ public struct GeminiConfig: Decodable, Sendable, Equatable {
         rpcStatus: String, rpcUsage: String, rpcQuota: String,
         wizAt: String = "SNlM0e", wizBuild: String = "cfb2h",
         wizSession: String = "FdrFJe", wizLang: String = "TuX5cc",
-        models: [GeminiModel], defaultModel: String, promptVersion: Int = 1
+        models: [GeminiModel], defaultModel: String, promptVersion: Int = 1,
+        modelHeaderTemplate: String? = nil, batchModelHeaderTemplate: String? = nil,
+        sessionHeaderTemplate: String? = nil
     ) {
         self.appURL = appURL
         self.generateURL = generateURL
@@ -115,6 +138,9 @@ public struct GeminiConfig: Decodable, Sendable, Equatable {
         self.models = models
         self.defaultModel = defaultModel
         self.promptVersion = promptVersion
+        self.modelHeaderTemplate = modelHeaderTemplate
+        self.batchModelHeaderTemplate = batchModelHeaderTemplate
+        self.sessionHeaderTemplate = sessionHeaderTemplate
     }
 
     public func model(id: String?) -> GeminiModel? {
@@ -255,11 +281,86 @@ public enum GeminiProtocol {
     public static let sessionHeaderName = "x-goog-ext-525005358-jspb"
     public static let extraHeaderName89 = "x-goog-ext-73010989-jspb"
     public static let extraHeaderName90 = "x-goog-ext-73010990-jspb"
+
+    /// The model-selection header from docs/SPEC.md §7.2. Its length is part of
+    /// the protocol: the reference implementation sends a 15-element form without
+    /// the trailing `1,"<session>"`, so that variant is the first thing to try if
+    /// the backend answers `1052`.
+    public static let defaultModelHeaderTemplate =
+        "[1,null,null,null,\"{model}\",null,null,0,[4,5,6,8],null,null,{capacity},null,null,{number},1,\"{session}\"]"
+
+    /// The same header for batchexecute: no model id, only the flag set and the
+    /// session.
+    public static let defaultBatchModelHeaderTemplate =
+        "[1,null,null,null,null,null,null,null,[4,5,6,8],null,null,null,null,null,null,null,\"{session}\"]"
+
+    /// `x-goog-ext-525005358-jspb`. The reference implementation does not send it
+    /// at all, so an empty override is a supported configuration.
+    public static let defaultSessionHeaderTemplate = "[\"{session}\",1]"
 }
 
 // MARK: - Request building
 
 public enum GeminiRequestBuilder {
+    // MARK: Header templates
+
+    /// Fills `{model}`, `{capacity}`, `{number}` and `{session}` in a template.
+    static func substitute(
+        _ template: String, model: GeminiModel?, sessionUUID: String
+    ) -> String {
+        var out = template.replacingOccurrences(of: "{session}", with: sessionUUID)
+        if let model {
+            out = out.replacingOccurrences(of: "{model}", with: model.id)
+            out = out.replacingOccurrences(of: "{capacity}", with: String(model.capacity))
+            out = out.replacingOccurrences(of: "{number}", with: String(model.number))
+        }
+        return out
+    }
+
+    /// Renders an override, falling back to the built-in template when the result
+    /// is not valid JSON. A broken override is a configuration mistake, not a
+    /// reason to stop translating.
+    static func render(
+        template: String?, fallback: String, model: GeminiModel?, sessionUUID: String,
+        label: String
+    ) -> String {
+        guard let template else {
+            return substitute(fallback, model: model, sessionUUID: sessionUUID)
+        }
+        let rendered = substitute(template, model: model, sessionUUID: sessionUUID)
+        guard JSONPayload.parse(rendered) != nil else {
+            CoreLog.warn("\(label): override is not valid JSON, using the built-in header")
+            return substitute(fallback, model: model, sessionUUID: sessionUUID)
+        }
+        return rendered
+    }
+
+    public static func modelHeader(config: GeminiConfig, model: GeminiModel, sessionUUID: String) -> String {
+        render(template: config.modelHeaderTemplate,
+               fallback: GeminiProtocol.defaultModelHeaderTemplate,
+               model: model, sessionUUID: sessionUUID, label: "modelHeader")
+    }
+
+    static func batchModelHeader(config: GeminiConfig, sessionUUID: String) -> String {
+        render(template: config.batchModelHeaderTemplate,
+               fallback: GeminiProtocol.defaultBatchModelHeaderTemplate,
+               model: nil, sessionUUID: sessionUUID, label: "batchModelHeader")
+    }
+
+    /// Nil means "do not send the header": either the override is empty, or the
+    /// built-in template was overridden to nothing.
+    public static func sessionHeader(config: GeminiConfig, sessionUUID: String) -> String? {
+        let template = config.sessionHeaderTemplate ?? GeminiProtocol.defaultSessionHeaderTemplate
+        guard !template.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        let rendered = substitute(template, model: nil, sessionUUID: sessionUUID)
+        guard JSONPayload.parse(rendered) != nil else {
+            CoreLog.warn("sessionHeader: override is not valid JSON, using the built-in header")
+            return substitute(GeminiProtocol.defaultSessionHeaderTemplate,
+                              model: nil, sessionUUID: sessionUUID)
+        }
+        return rendered
+    }
+
     // MARK: Generate
 
     /// The 81-element positional array posted as `f.req`.
@@ -312,22 +413,23 @@ public enum GeminiRequestBuilder {
         return components.url!.absoluteString
     }
 
-    public static func generateHeaders(model: GeminiModel, sessionUUID: String) -> [String: String] {
-        let modelHeader = JSONValue.array([
-            .int(1), .null, .null, .null, .string(model.id), .null, .null, .int(0),
-            .array([.int(4), .int(5), .int(6), .int(8)]), .null, .null, .int(model.capacity),
-            .null, .null, .int(model.number), .int(1), .string(sessionUUID),
-        ]).jsonText
-        return [
+    public static func generateHeaders(
+        config: GeminiConfig, model: GeminiModel, sessionUUID: String
+    ) -> [String: String] {
+        var headers: [String: String] = [
             "Content-Type": GeminiProtocol.formContentType,
             "Origin": GeminiProtocol.origin,
             "Referer": GeminiProtocol.referer,
             "X-Same-Domain": GeminiProtocol.sameDomain,
-            GeminiProtocol.modelHeaderName: modelHeader,
-            GeminiProtocol.sessionHeaderName: JSONValue.array([.string(sessionUUID), .int(1)]).jsonText,
+            GeminiProtocol.modelHeaderName: modelHeader(
+                config: config, model: model, sessionUUID: sessionUUID),
             GeminiProtocol.extraHeaderName89: "[0]",
             GeminiProtocol.extraHeaderName90: "[0,0,0]",
         ]
+        if let session = sessionHeader(config: config, sessionUUID: sessionUUID) {
+            headers[GeminiProtocol.sessionHeaderName] = session
+        }
+        return headers
     }
 
     // MARK: batchexecute
@@ -366,22 +468,20 @@ public enum GeminiRequestBuilder {
         return components.url!.absoluteString
     }
 
-    public static func batchExecHeaders(sessionUUID: String) -> [String: String] {
-        let modelHeader = JSONValue.array([
-            .int(1), .null, .null, .null, .null, .null, .null, .null,
-            .array([.int(4), .int(5), .int(6), .int(8)]), .null, .null, .null,
-            .null, .null, .null, .null, .string(sessionUUID),
-        ]).jsonText
-        return [
+    public static func batchExecHeaders(config: GeminiConfig, sessionUUID: String) -> [String: String] {
+        var headers: [String: String] = [
             "Content-Type": GeminiProtocol.formContentType,
             "Origin": GeminiProtocol.origin,
             "Referer": GeminiProtocol.referer,
             "X-Same-Domain": GeminiProtocol.sameDomain,
-            GeminiProtocol.modelHeaderName: modelHeader,
-            GeminiProtocol.sessionHeaderName: JSONValue.array([.string(sessionUUID), .int(1)]).jsonText,
+            GeminiProtocol.modelHeaderName: batchModelHeader(config: config, sessionUUID: sessionUUID),
             GeminiProtocol.extraHeaderName89: "[0]",
             GeminiProtocol.extraHeaderName90: "[0,0,0]",
         ]
+        if let session = sessionHeader(config: config, sessionUUID: sessionUUID) {
+            headers[GeminiProtocol.sessionHeaderName] = session
+        }
+        return headers
     }
 
     /// Payload literals for the quota RPC.

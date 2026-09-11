@@ -102,7 +102,8 @@ final class GeminiProtocolTests: XCTestCase {
     // MARK: - Headers
 
     func testGenerateHeadersCarryTheModelSelection() throws {
-        let headers = GeminiRequestBuilder.generateHeaders(model: model, sessionUUID: sessionUUID)
+        let headers = GeminiRequestBuilder.generateHeaders(
+            config: GeminiConfig.lastResort, model: model, sessionUUID: sessionUUID)
         XCTAssertEqual(headers["Content-Type"], "application/x-www-form-urlencoded;charset=utf-8")
         XCTAssertEqual(headers["Origin"], "https://gemini.google.com")
         XCTAssertEqual(headers["Referer"], "https://gemini.google.com/")
@@ -126,8 +127,90 @@ final class GeminiProtocolTests: XCTestCase {
         XCTAssertEqual(sessionHeader, .array([.string(sessionUUID), .int(1)]))
     }
 
+    // MARK: - Header overrides
+
+    /// A 15-element model header without the trailing session pair, which is what
+    /// the reference implementation sends. It is the first thing to try on a 1052,
+    /// and it has to be reachable by editing gemini-web.json on the device.
+    private let shortModelHeader =
+        "[1,null,null,null,\"{model}\",null,null,0,[4,5,6,8],null,null,{capacity},null,null,{number}]"
+
+    private func overrideConfig(_ mutate: (inout [String: Any]) -> Void) throws -> GeminiConfig {
+        var object: [String: Any] = [
+            "init": "https://gemini.google.com/app",
+            "generate": "https://gemini.google.com/gen",
+            "batchexecute": "https://gemini.google.com/batch",
+            "rotateCookies": "https://accounts.google.com/RotateCookies",
+            "rpc": ["status": "otAQ7b", "usage": "jSf9Qc", "quota": "qpEbW"],
+            "wizKeys": ["at": "SNlM0e", "build": "cfb2h", "session": "FdrFJe", "lang": "TuX5cc"],
+            "models": [["id": "56fdd199312815e2", "label": "Flash", "capacity": 4, "number": 1]],
+            "defaultModel": "56fdd199312815e2",
+        ]
+        mutate(&object)
+        let data = try JSONSerialization.data(withJSONObject: object)
+        return try JSONDecoder().decode(GeminiConfig.self, from: data)
+    }
+
+    func testDefaultHeaderTemplatesAreUsedWhenNothingIsOverridden() throws {
+        let config = try overrideConfig { _ in }
+        let header = GeminiRequestBuilder.modelHeader(
+            config: config, model: model, sessionUUID: sessionUUID)
+        XCTAssertEqual(header, GeminiProtocol.defaultModelHeaderTemplate
+            .replacingOccurrences(of: "{model}", with: model.id)
+            .replacingOccurrences(of: "{capacity}", with: String(model.capacity))
+            .replacingOccurrences(of: "{number}", with: String(model.number))
+            .replacingOccurrences(of: "{session}", with: sessionUUID))
+        let decoded = try decode(header)
+        XCTAssertEqual(decoded.arrayValue?.count, 17)
+        XCTAssertEqual(decoded[16], .string(sessionUUID))
+    }
+
+    func testModelHeaderOverrideIsApplied() throws {
+        let config = try overrideConfig { $0["modelHeader"] = shortModelHeader }
+        let header = GeminiRequestBuilder.modelHeader(
+            config: config, model: model, sessionUUID: sessionUUID)
+        let decoded = try decode(header)
+        XCTAssertEqual(decoded.arrayValue?.count, 15, "the override replaces the built-in shape")
+        XCTAssertEqual(decoded[4], .string(model.id))
+        XCTAssertEqual(decoded[11], .int(model.capacity))
+        XCTAssertEqual(decoded[14], .int(model.number))
+    }
+
+    func testBrokenModelHeaderOverrideFallsBackInsteadOfBreaking() throws {
+        // Deliberately truncated JSON: a typo in the override must be survivable.
+        let config = try overrideConfig { $0["modelHeader"] = #"[1,null,"{model}""# }
+        let header = GeminiRequestBuilder.modelHeader(
+            config: config, model: model, sessionUUID: sessionUUID)
+        XCTAssertEqual(try decode(header).arrayValue?.count, 17,
+                       "a typo in the override must not take translation down")
+    }
+
+    func testSessionHeaderCanBeDisabledAndOverridden() throws {
+        let enabled = try overrideConfig { _ in }
+        XCTAssertEqual(
+            GeminiRequestBuilder.sessionHeader(config: enabled, sessionUUID: sessionUUID),
+            "[\"\(sessionUUID)\",1]")
+
+        let disabled = try overrideConfig { $0["sessionHeader"] = "" }
+        XCTAssertNil(GeminiRequestBuilder.sessionHeader(config: disabled, sessionUUID: sessionUUID),
+                     "the reference implementation sends no session header at all")
+        let headers = GeminiRequestBuilder.generateHeaders(
+            config: disabled, model: model, sessionUUID: sessionUUID)
+        XCTAssertNil(headers[GeminiProtocol.sessionHeaderName])
+        XCTAssertNotNil(headers[GeminiProtocol.modelHeaderName], "the model header stays")
+    }
+
+    func testBatchModelHeaderOverrideIsApplied() throws {
+        let config = try overrideConfig {
+            $0["batchModelHeader"] = "[1,null,null,null,null,null,null,null,[4,5,6,8],null,null,null,null,null,null,null]"
+        }
+        let header = GeminiRequestBuilder.batchModelHeader(config: config, sessionUUID: sessionUUID)
+        XCTAssertEqual(try decode(header).arrayValue?.count, 16)
+    }
+
     func testBatchExecModelHeaderHasNoModel() throws {
-        let headers = GeminiRequestBuilder.batchExecHeaders(sessionUUID: sessionUUID)
+        let headers = GeminiRequestBuilder.batchExecHeaders(
+            config: GeminiConfig.lastResort, sessionUUID: sessionUUID)
         let modelHeader = try decode(try XCTUnwrap(headers[GeminiProtocol.modelHeaderName]))
         XCTAssertEqual(modelHeader.arrayValue?.count, 17)
         XCTAssertTrue(modelHeader[4]?.isNull == true, "status and usage RPCs carry no model id")
