@@ -46,6 +46,10 @@ struct RootView: View {
             // Documents copied into the sandbox or shared from another app.
             Task { await app.importBook(from: url) }
         }
+        .task {
+            // state.json remembers whether a translation was mid-flight.
+            app.resumeQueueIfNeeded()
+        }
     }
 }
 

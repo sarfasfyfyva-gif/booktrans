@@ -14,6 +14,7 @@ final class AppState {
     let books: BookStore
     let settings: AppSettings
     let gemini: GeminiSession
+    let queue: TranslationQueue
 
     /// Library screen contents, newest-opened first.
     private(set) var entries: [LibraryEntry] = []
@@ -51,8 +52,18 @@ final class AppState {
         self.paths = paths
         self.library = LibraryStore(paths: paths)
         self.books = BookStore(paths: paths)
-        self.settings = settings ?? AppSettings()
-        self.gemini = GeminiSession(paths: paths, transport: transport ?? GeminiWebTransport())
+        let resolvedSettings = settings ?? AppSettings()
+        let session = GeminiSession(paths: paths, transport: transport ?? GeminiWebTransport())
+        self.settings = resolvedSettings
+        self.gemini = session
+        self.queue = TranslationQueue(
+            paths: paths,
+            books: BookStore(paths: paths),
+            library: LibraryStore(paths: paths),
+            settings: resolvedSettings,
+            provider: resolvedSettings.useMockTranslator
+                ? MockTranslationProvider()
+                : GeminiTranslationProvider(session: session))
 
         // Logging hook is installed before any store touches disk so that early
         // failures reach the on-disk log.
@@ -62,6 +73,21 @@ final class AppState {
         bootstrap()
         reloadLibrary()
         applyIdleTimerSetting()
+        queue.onBatchFinished = { [weak self] _ in
+            self?.noteTranslationChanged()
+        }
+    }
+
+    /// Rebuilds the provider after the mock translator is toggled.
+    func applyProviderSetting() {
+        queue.setProvider(settings.useMockTranslator
+            ? MockTranslationProvider()
+            : GeminiTranslationProvider(session: gemini))
+    }
+
+    /// Continues a translation that was running when the app was last closed.
+    func resumeQueueIfNeeded() {
+        queue.resumeFromStoredState()
     }
 
     /// Creates the fixed sandbox directories. Safe to run on every launch.
@@ -125,9 +151,14 @@ final class AppState {
     /// it is active, so pausing is not optional.
     func handleScenePhase(_ phase: ScenePhase) {
         applyIdleTimerSetting()
-        if phase != .active {
+        switch phase {
+        case .active:
+            break
+        default:
+            // iOS suspends the app, so translation cannot continue; stop after
+            // the request that is already in flight.
             CoreLog.info("scene became \(String(describing: phase)); pausing translation")
-            requestTranslationPause()
+            queue.pause()
         }
     }
 
@@ -135,11 +166,4 @@ final class AppState {
         UIApplication.shared.isIdleTimerDisabled = settings.keepScreenAwake
     }
 
-    /// Replaced by the translation queue once it exists; kept as an explicit
-    /// hook so the lifecycle decision stays in one place.
-    var onRequestTranslationPause: (() -> Void)?
-
-    private func requestTranslationPause() {
-        onRequestTranslationPause?()
-    }
 }

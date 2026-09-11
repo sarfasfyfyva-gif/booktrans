@@ -202,6 +202,9 @@ public struct Batch: Codable, Sendable, Identifiable {
     public var error: String?
     public var finishedAt: Date?
     public var units: [PlanUnit]
+    /// True once the lookahead terminology request has run for this batch.
+    /// Without it every retry would spend another request on the same text.
+    public var lookaheadDone: Bool
 
     public var id: Int { index }
 
@@ -212,7 +215,8 @@ public struct Batch: Codable, Sendable, Identifiable {
         attempts: Int = 0,
         error: String? = nil,
         finishedAt: Date? = nil,
-        units: [PlanUnit]
+        units: [PlanUnit],
+        lookaheadDone: Bool = false
     ) {
         self.index = index
         self.chars = chars
@@ -221,10 +225,11 @@ public struct Batch: Codable, Sendable, Identifiable {
         self.error = error
         self.finishedAt = finishedAt
         self.units = units
+        self.lookaheadDone = lookaheadDone
     }
 
     private enum CodingKeys: String, CodingKey {
-        case index, chars, status, attempts, error, finishedAt, units
+        case index, chars, status, attempts, error, finishedAt, units, lookaheadDone
     }
 
     public init(from decoder: Decoder) throws {
@@ -236,6 +241,7 @@ public struct Batch: Codable, Sendable, Identifiable {
         error = try c.decodeIfPresent(String.self, forKey: .error)
         finishedAt = try c.decodeIfPresent(Date.self, forKey: .finishedAt)
         units = try c.decodeIfPresent([PlanUnit].self, forKey: .units) ?? []
+        lookaheadDone = try c.decodeIfPresent(Bool.self, forKey: .lookaheadDone) ?? false
     }
 }
 

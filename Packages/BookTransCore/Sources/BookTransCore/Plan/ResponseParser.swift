@@ -27,19 +27,45 @@ public enum ResponseParserError: LocalizedError, Equatable {
 }
 
 public enum ResponseParser {
-    public static func parse(_ raw: String, expectedCount: Int) -> Result<ParsedModelAnswer, ResponseParserError> {
+    /// Strips a ```` ``` ````/```` ```json ```` fence and surrounding whitespace.
+    /// Shared by the batch and the lookahead parsers.
+    public static func stripFences(_ raw: String) -> String {
         var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if text.hasPrefix("```") {
-            if let newline = text.firstIndex(of: "\n") {
-                text = String(text[text.index(after: newline)...])
-            } else {
-                text = ""
-            }
-            if let fence = text.range(of: "```", options: .backwards) {
-                text = String(text[..<fence.lowerBound])
-            }
-            text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.hasPrefix("```") else { return text }
+        if let newline = text.firstIndex(of: "\n") {
+            text = String(text[text.index(after: newline)...])
+        } else {
+            return ""
         }
+        if let fence = text.range(of: "```", options: .backwards) {
+            text = String(text[..<fence.lowerBound])
+        }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private struct GlossaryAnswer: Decodable {
+        var glossary: [GlossaryAddition]?
+    }
+
+    /// Parses the lookahead answer, which contains a glossary and nothing else.
+    /// Returns an empty array rather than failing: terminology extraction is an
+    /// optimisation, and a malformed answer must not stop the batch itself.
+    public static func parseGlossary(_ raw: String) -> [GlossaryAddition] {
+        let text = stripFences(raw)
+        guard let open = text.firstIndex(of: "{"),
+              let close = text.lastIndex(of: "}"),
+              open <= close,
+              let data = String(text[open...close]).data(using: .utf8),
+              let answer = try? JSONDecoder().decode(GlossaryAnswer.self, from: data)
+        else { return [] }
+        return (answer.glossary ?? []).filter {
+            !$0.term.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && !$0.translation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
+
+    public static func parse(_ raw: String, expectedCount: Int) -> Result<ParsedModelAnswer, ResponseParserError> {
+        var text = stripFences(raw)
 
         var lastCount: Int?
 

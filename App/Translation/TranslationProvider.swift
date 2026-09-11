@@ -6,6 +6,8 @@ import BookTransCore
 /// Gemini account.
 @MainActor
 protocol TranslationProvider: AnyObject {
+    /// Identifies the provider in stored batch results.
+    var modelIdentifier: String { get }
     /// Sends one prompt and returns the model's raw text answer.
     func complete(prompt: String) async throws -> String
 }
@@ -14,6 +16,8 @@ protocol TranslationProvider: AnyObject {
 @MainActor
 final class GeminiTranslationProvider: TranslationProvider {
     private let session: GeminiSession
+
+    var modelIdentifier: String { session.selectedModelId }
 
     init(session: GeminiSession) {
         self.session = session
@@ -30,6 +34,8 @@ final class GeminiTranslationProvider: TranslationProvider {
 /// It reads the `[БЛОКИ]` array back out of the prompt rather than being told what
 /// to answer, which means a prompt-building regression shows up here too.
 final class MockTranslationProvider: TranslationProvider {
+    var modelIdentifier: String { "mock" }
+
     /// Artificial latency, so the queue's pause and resume paths are exercised.
     var delay: Duration = .milliseconds(120)
     /// When set, the first `failuresBeforeSuccess` calls throw instead of answering.

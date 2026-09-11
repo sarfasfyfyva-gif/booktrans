@@ -12,10 +12,12 @@ struct BookView: View {
     @State private var plan: BatchPlan?
     @State private var translations = TranslationMap()
     @State private var readingChapter: Int?
+    @State private var showingLogin = false
 
     var body: some View {
         List {
             header
+            translationControlSection
             progressSection
             readingSection
             chaptersSection
@@ -26,6 +28,7 @@ struct BookView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { reload() }
         .onChange(of: app.translationRevision) { _, _ in reload() }
+        .sheet(isPresented: $showingLogin) { GeminiLoginSheet() }
         .navigationDestination(isPresented: Binding(
             get: { readingChapter != nil },
             set: { if !$0 { readingChapter = nil } })) {
@@ -33,6 +36,69 @@ struct BookView: View {
                 ReaderView(bookId: bookId, startChapter: index)
             }
         }
+    }
+
+    // MARK: - Translation control
+
+    @ViewBuilder
+    private var translationControlSection: some View {
+        Section("Управление переводом") {
+            if let plan {
+                let remaining = plan.batches.filter { $0.status != .done }.count
+                if remaining == 0 {
+                    Label("Перевод завершён", systemImage: "checkmark.circle")
+                        .foregroundStyle(Theme.success)
+                } else if queueActive {
+                    HStack {
+                        Text(app.queue.message ?? "Идёт перевод")
+                            .font(.footnote)
+                            .foregroundStyle(Theme.secondaryText)
+                        Spacer()
+                        ProgressView().controlSize(.small)
+                    }
+                    Button(role: .destructive) {
+                        app.queue.pause()
+                    } label: {
+                        Label("Пауза", systemImage: "pause")
+                    }
+                } else {
+                    Button {
+                        app.queue.start(bookId: bookId)
+                    } label: {
+                        Label(plan.doneCount > 0 ? "Продолжить перевод" : "Начать перевод",
+                              systemImage: "play")
+                    }
+                    if plan.doneCount > 0 {
+                        Text("Осталось батчей: \(remaining)")
+                            .font(.caption)
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+                }
+
+                if app.queue.status == .waitingAuth, queueActive {
+                    Button {
+                        showingLogin = true
+                    } label: {
+                        Label("Войти в Gemini", systemImage: "person.crop.circle.badge.exclamationmark")
+                    }
+                }
+            }
+
+            NavigationLink {
+                GlossaryView(bookId: bookId)
+            } label: {
+                Label("Глоссарий", systemImage: "character.book.closed")
+            }
+            NavigationLink {
+                BatchListView(bookId: bookId)
+            } label: {
+                Label("Батчи", systemImage: "square.stack.3d.up")
+            }
+        }
+    }
+
+    private var queueActive: Bool {
+        app.queue.activeBookId == bookId && app.queue.status != .idle && app.queue.status != .failed
     }
 
     // MARK: - Sections

@@ -99,7 +99,10 @@ struct SettingsView: View {
                 }))
             Toggle("Мок-переводчик (без Gemini)", isOn: Binding(
                 get: { app.settings.useMockTranslator },
-                set: { app.settings.useMockTranslator = $0 }))
+                set: { newValue in
+                    app.settings.useMockTranslator = newValue
+                    app.applyProviderSetting()
+                }))
         } header: {
             Text("Перевод")
         } footer: {
