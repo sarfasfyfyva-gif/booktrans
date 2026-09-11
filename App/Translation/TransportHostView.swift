@@ -27,15 +27,9 @@ struct GeminiLoginSheet: View {
 
     var body: some View {
         NavigationStack {
-            Group {
-                if let session = app.gemini {
-                    TransportHostView(webView: session.transport.webView, interactive: true)
-                        .background(Theme.background)
-                } else {
-                    ProgressView().tint(Theme.accent)
-                }
-            }
-            .navigationTitle("Вход в Gemini")
+            TransportHostView(webView: app.gemini.transport.webView, interactive: true)
+                .background(Theme.background)
+                .navigationTitle("Вход в Gemini")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {

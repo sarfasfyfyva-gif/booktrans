@@ -52,7 +52,7 @@ final class GeminiSession {
     private var lastWizRefresh: Date?
     private var lastCookieRotation: Date?
 
-    init(paths: BookPaths, transport: GeminiWebTransport = GeminiWebTransport()) {
+    init(paths: BookPaths, transport: GeminiWebTransport) {
         self.paths = paths
         self.transport = transport
         self.config = GeminiConfigLoader.resolve(override: FileStore.readData(paths.geminiConfigOverride))

@@ -31,18 +31,21 @@ final class AppState {
         let text: String
     }
 
+    /// Dependencies are injected as optionals and built inside the initializer:
+    /// default arguments are evaluated in the caller's (nonisolated) context, so
+    /// `= AppSettings()` there cannot reach a main-actor initializer.
     init(
         docsRoot: URL? = nil,
-        settings: AppSettings = AppSettings(),
-        transport: GeminiWebTransport = GeminiWebTransport()
+        settings: AppSettings? = nil,
+        transport: GeminiWebTransport? = nil
     ) {
         let root = docsRoot ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let paths = BookPaths(docsRoot: root)
         self.paths = paths
         self.library = LibraryStore(paths: paths)
         self.books = BookStore(paths: paths)
-        self.settings = settings
-        self.gemini = GeminiSession(paths: paths, transport: transport)
+        self.settings = settings ?? AppSettings()
+        self.gemini = GeminiSession(paths: paths, transport: transport ?? GeminiWebTransport())
 
         // Logging hook is installed before any store touches disk so that early
         // failures reach the on-disk log.
