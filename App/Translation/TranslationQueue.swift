@@ -97,6 +97,19 @@ final class TranslationQueue {
         setStatus(.idle, message: nil, bookId: activeBookId)
     }
 
+    /// Puts the queue into the "needs a sign-in" state. Called after the user
+    /// signs out, so the UI shows the banner instead of silently doing nothing.
+    func requireAuthentication(bookId: String? = nil) {
+        guard let target = bookId ?? activeBookId else { return }
+        worker?.cancel()
+        worker = nil
+        isWorking = false
+        notBefore = nil
+        let text = "Нужно войти в Gemini"
+        setStatus(.waitingAuth, message: text, bookId: target)
+        persistState(bookId: target, status: .waitingAuth, message: text)
+    }
+
     /// Resets batches to `pending`, deleting their results, and starts again.
     func retranslate(bookId: String, indices: [Int]) {
         guard var plan = books.loadPlan(bookId) else { return }

@@ -51,6 +51,7 @@ struct SettingsView: View {
                 Button("Выйти из аккаунта", role: .destructive) {
                     Task {
                         await app.gemini.signOut()
+                        app.queue.requireAuthentication()
                         app.show("Выполнен выход из Gemini")
                     }
                 }
@@ -184,7 +185,14 @@ struct SettingsView: View {
         let ok = await app.gemini.refreshSession(force: true)
         if ok { await app.gemini.refreshAccountStatus() }
         isRefreshing = false
-        app.show(ok ? "Сессия Gemini обновлена" : "Нужно войти в Gemini",
-                 kind: ok ? .info : .error)
+        if ok {
+            // A waiting queue can carry on now that the session works again.
+            if app.queue.status == .waitingAuth, let bookId = app.queue.activeBookId {
+                app.queue.resume(bookId: bookId)
+            }
+            app.show("Сессия Gemini обновлена")
+        } else {
+            app.show("Нужно войти в Gemini", kind: .error)
+        }
     }
 }

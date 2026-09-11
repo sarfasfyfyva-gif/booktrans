@@ -42,7 +42,12 @@ struct GeminiLoginSheet: View {
                             await app.gemini.refreshSession(force: true)
                             await app.gemini.refreshAccountStatus()
                             isWorking = false
-                            if app.gemini.signInState == .signedIn { dismiss() }
+                            if app.gemini.signInState == .signedIn {
+                                if app.queue.status == .waitingAuth, let bookId = app.queue.activeBookId {
+                                    app.queue.resume(bookId: bookId)
+                                }
+                                dismiss()
+                            }
                         }
                     } label: {
                         if isWorking {
