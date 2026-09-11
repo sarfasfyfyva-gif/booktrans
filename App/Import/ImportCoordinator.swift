@@ -155,7 +155,7 @@ struct ImportCoordinator {
                 continue
             }
             let target = imagesDirectory.appendingPathComponent(FB2Parser.fileName(for: image))
-            guard ImageDownscaler.write(decoded, to: target) else {
+            if !ImageDownscaler.write(decoded, to: target) {
                 CoreLog.warn("import: cannot write image \(image.id)")
             }
         }
