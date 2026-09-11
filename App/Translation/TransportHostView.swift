@@ -38,6 +38,9 @@ struct GeminiLoginSheet: View {
         configuration.websiteDataStore = .default()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         let webView = WKWebView(frame: .zero, configuration: configuration)
+        // The login itself happens here, so this is the WebView that must not
+        // look embedded to Google.
+        webView.customUserAgent = SafariUserAgent.mobileSafari()
         return webView
     }
 

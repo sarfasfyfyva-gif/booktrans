@@ -44,7 +44,9 @@ final class GeminiWebTransport {
 
         let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 1, height: 1),
                                 configuration: configuration)
-        webView.customUserAgent = nil    // keep the stock Safari UA
+        // Not `nil`: the stock WKWebView UA is the embedded-browser signature
+        // Google refuses to sign in from. See SafariUserAgent.
+        webView.customUserAgent = SafariUserAgent.mobileSafari()
         webView.allowsBackForwardNavigationGestures = false
         self.webView = webView
         self.delegate = NavigationDelegate()

@@ -67,18 +67,18 @@ struct LibraryView: View {
     }
 }
 
-/// The file types the picker offers. FB2 has no system type, so the app declares
-/// its own (`com.gennadiy.booktrans.fb2` in Info.plist) and `.xml` is accepted
-/// because FB2 files are frequently named that way.
+/// The file types the picker offers.
+///
+/// Everything is selectable on purpose: books arrive with unexpected extensions
+/// (`.fb2.zip`, `.xml`, a `.zip` holding one FB2), in other apps' containers, and
+/// under providers that do not report a content type at all. Filtering the
+/// browser would hide files the importer can actually read, so the picker shows
+/// all items and `ImportCoordinator` decides what it can handle, reporting what it
+/// cannot.
 enum BookTransFileTypes {
     static let fb2Identifier = "com.gennadiy.booktrans.fb2"
 
-    static var importable: [UTType] {
-        var types: [UTType] = [.epub]
-        if let fb2 = UTType(fb2Identifier) { types.append(fb2) }
-        types.append(.xml)
-        return types
-    }
+    static var importable: [UTType] { [.item] }
 }
 
 private struct EmptyLibraryView: View {

@@ -117,16 +117,12 @@ final class GeminiSession {
 
     var hasConfigOverride: Bool { FileStore.exists(paths.geminiConfigOverride) }
 
-    /// The RPC is the source of truth for which models exist and what the account
-    /// calls them; presets only fill in `capacity`/`number` (which are positional
-    /// and cannot be derived) and stand in when the RPC returns nothing.
+    /// The account is the source of truth: when the RPC answers, its list is used
+    /// verbatim, including names like "Flash 3.8" that a preset can only guess at.
+    /// Presets exist for the case where the RPC returns nothing, so a stale preset
+    /// can never appear next to the account's real models.
     private func mergedModels(rpc: [GeminiModel], presets: [GeminiModel]) -> [GeminiModel] {
-        guard !rpc.isEmpty else { return presets }
-        var result = rpc
-        for preset in presets where !result.contains(where: { $0.id == preset.id }) {
-            result.append(preset)
-        }
-        return result
+        rpc.isEmpty ? presets : rpc
     }
 
     // MARK: - Session
