@@ -1,0 +1,111 @@
+name: BookTrans
+
+options:
+  bundleIdPrefix: com.gennadiy
+  createIntermediateGroups: true
+  groupSortPosition: top
+  generateEmptyDirectories: true
+  deploymentTarget:
+    iOS: "26.0"
+
+packages:
+  BookTransCore:
+    path: Packages/BookTransCore
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "26.0"
+    ENABLE_USER_SCRIPT_SANDBOXING: "YES"
+    SWIFT_COMPILATION_MODE: wholemodule
+    CLANG_ENABLE_MODULES: "YES"
+
+targets:
+  BookTrans:
+    type: application
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: App
+        excludes:
+          - "Resources/Info.plist"
+    dependencies:
+      - package: BookTransCore
+        product: BookTransCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.gennadiy.booktrans
+        PRODUCT_NAME: BookTrans
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        INFOPLIST_KEY_UIUserInterfaceStyle: Dark
+        SWIFT_EMIT_LOC_STRINGS: "YES"
+        GENERATE_INFOPLIST_FILE: "NO"
+    info:
+      path: App/Resources/Info.plist
+      properties:
+        CFBundleDisplayName: BookTrans
+        CFBundleName: BookTrans
+        UIUserInterfaceStyle: Dark
+        UILaunchScreen:
+          UIColorName: ""
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UIRequiresFullScreen: true
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        ITSAppUsesNonExemptEncryption: false
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: EPUB Book
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Owner
+            LSItemContentTypes:
+              - org.idpf.epub-container
+          - CFBundleTypeName: FictionBook 2
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Owner
+            LSItemContentTypes:
+              - com.gennadiy.booktrans.fb2
+        UTImportedTypeDeclarations:
+          - UTTypeIdentifier: com.gennadiy.booktrans.fb2
+            UTTypeDescription: FictionBook 2
+            UTTypeConformsTo:
+              - public.xml
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - fb2
+              public.mime-type:
+                - application/x-fictionbook+xml
+
+  BookTransTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - AppTests
+    dependencies:
+      - target: BookTrans
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.gennadiy.booktrans.tests
+        GENERATE_INFOPLIST_FILE: "YES"
+        SWIFT_VERSION: "5.0"
+
+schemes:
+  BookTrans:
+    build:
+      targets:
+        BookTrans: all
+        BookTransTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - BookTransTests
+    archive:
+      config: Release
