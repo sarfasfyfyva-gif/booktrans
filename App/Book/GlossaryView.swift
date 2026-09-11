@@ -35,7 +35,7 @@ struct GlossaryView: View {
                         .foregroundStyle(Theme.secondaryText)
                 }
             } else {
-                ForEach(filtered) { term in
+                ForEach(filtered, id: \.key) { term in
                     Button {
                         editing = EditingTerm(term: term)
                     } label: {

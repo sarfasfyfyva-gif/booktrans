@@ -33,6 +33,7 @@ final class GeminiTranslationProvider: TranslationProvider {
 ///
 /// It reads the `[БЛОКИ]` array back out of the prompt rather than being told what
 /// to answer, which means a prompt-building regression shows up here too.
+@MainActor
 final class MockTranslationProvider: TranslationProvider {
     var modelIdentifier: String { "mock" }
 

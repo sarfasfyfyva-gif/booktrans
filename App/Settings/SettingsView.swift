@@ -91,18 +91,10 @@ struct SettingsView: View {
 
     private var translationSection: some View {
         Section {
-            Toggle("Не гасить экран во время перевода", isOn: Binding(
-                get: { app.settings.keepScreenAwake },
-                set: { newValue in
-                    app.settings.keepScreenAwake = newValue
-                    app.applyIdleTimerSetting()
-                }))
-            Toggle("Мок-переводчик (без Gemini)", isOn: Binding(
-                get: { app.settings.useMockTranslator },
-                set: { newValue in
-                    app.settings.useMockTranslator = newValue
-                    app.applyProviderSetting()
-                }))
+            Toggle("Не гасить экран во время перевода", isOn: app.settings.keepScreenAwakeBinding)
+                .onChange(of: app.settings.keepScreenAwake) { _, _ in app.applyIdleTimerSetting() }
+            Toggle("Мок-переводчик (без Gemini)", isOn: app.settings.useMockTranslatorBinding)
+                .onChange(of: app.settings.useMockTranslator) { _, _ in app.applyProviderSetting() }
         } header: {
             Text("Перевод")
         } footer: {
@@ -114,11 +106,11 @@ struct SettingsView: View {
     private var appearanceSection: some View {
         Section("Чтение") {
             stepperRow(title: "Размер шрифта", value: app.settings.readerFontSize,
-                       range: 14...28, step: 1, suffix: "pt") { app.settings.readerFontSize = $0 }
+                       range: 14...28, step: 1, suffix: "pt") { app.settings.setReaderFontSize($0) }
             stepperRow(title: "Интерлиньяж", value: app.settings.readerLineHeight,
-                       range: 1.2...2.0, step: 0.05, suffix: "") { app.settings.readerLineHeight = $0 }
+                       range: 1.2...2.0, step: 0.05, suffix: "") { app.settings.setReaderLineHeight($0) }
             stepperRow(title: "Поля", value: app.settings.readerMargin,
-                       range: 8...48, step: 2, suffix: "pt") { app.settings.readerMargin = $0 }
+                       range: 8...48, step: 2, suffix: "pt") { app.settings.setReaderMargin($0) }
         }
     }
 

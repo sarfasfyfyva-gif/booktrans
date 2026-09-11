@@ -1,4 +1,6 @@
 import Foundation
+import Observation
+import UIKit
 import WebKit
 import SwiftUI
 import BookTransCore

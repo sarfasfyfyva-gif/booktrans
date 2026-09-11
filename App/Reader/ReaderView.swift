@@ -288,13 +288,13 @@ private struct TypographySheet: View {
             Form {
                 Section("Шрифт и интерлиньяж") {
                     slider("Размер", value: app.settings.readerFontSize, range: 13...30, step: 1,
-                           suffix: "pt") { app.settings.readerFontSize = $0 }
+                           suffix: "pt") { app.settings.setReaderFontSize($0) }
                     slider("Интерлиньяж", value: app.settings.readerLineHeight, range: 1.2...2.2,
-                           step: 0.05, suffix: "") { app.settings.readerLineHeight = $0 }
+                           step: 0.05, suffix: "") { app.settings.setReaderLineHeight($0) }
                 }
                 Section("Поля") {
                     slider("Боковые", value: app.settings.readerMargin, range: 8...56, step: 2,
-                           suffix: "pt") { app.settings.readerMargin = $0 }
+                           suffix: "pt") { app.settings.setReaderMargin($0) }
                 }
             }
             .scrollContentBackground(.hidden)

@@ -18,7 +18,9 @@ enum ImageDownscaler {
     static func write(_ data: Data, to url: URL, maxDimension: CGFloat = maxDimension) -> Bool {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return false }
 
-        guard let size = pixelSize(of: source), max(size.width, size.height) > maxDimension else {
+        guard let size = pixelSize(of: source),
+              max(size.width, size.height) > Int(maxDimension)
+        else {
             // Already small enough, or the format cannot be inspected: keep the
             // original bytes so nothing is lost.
             return FileStore.writeData(data, to: url)
@@ -38,7 +40,7 @@ enum ImageDownscaler {
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: maxDimension,
+            kCGImageSourceThumbnailMaxPixelSize: Int(maxDimension),
             kCGImageDestinationLossyCompressionQuality: 0.82,
         ]
         guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
