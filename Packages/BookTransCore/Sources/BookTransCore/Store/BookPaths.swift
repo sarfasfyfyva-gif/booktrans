@@ -83,6 +83,16 @@ public struct BookPaths: Sendable, Hashable {
         "images/\(fileName)"
     }
 
+    /// `reader.html` sits in the book directory and only that directory is
+    /// granted read access, so a stored reference must be rewritten for the
+    /// page: `images/abc.jpg` becomes `parsed/images/abc.jpg`.
+    public static func readerImageSource(for reference: String) -> String {
+        // Both importers write images flat into parsed/images, so only the file
+        // name matters; taking just that also makes a malicious reference unable
+        // to point anywhere else in the sandbox.
+        "\(imagesRelativeDir)/\((reference as NSString).lastPathComponent)"
+    }
+
     public func readerHTML(_ bookId: String) -> URL {
         bookDir(bookId).appendingPathComponent("reader.html")
     }

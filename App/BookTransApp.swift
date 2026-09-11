@@ -42,6 +42,10 @@ struct RootView: View {
             }
         }
         .animation(.snappy, value: app.banner)
+        .onOpenURL { url in
+            // Documents copied into the sandbox or shared from another app.
+            Task { await app.importBook(from: url) }
+        }
     }
 }
 

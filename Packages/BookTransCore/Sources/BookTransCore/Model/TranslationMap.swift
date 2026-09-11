@@ -70,4 +70,22 @@ public struct TranslationMap: Sendable {
     public var untranslatedBlockIds: [Int] {
         expectedParts.keys.filter { translatedText(for: $0) == nil }.sorted()
     }
+
+    /// True when every translatable block of the chapter is fully translated.
+    /// A chapter with nothing to translate counts as complete.
+    public func isTranslated(_ chapter: Chapter) -> Bool {
+        let counts = blockCounts(in: chapter)
+        return counts.total == 0 || counts.done == counts.total
+    }
+
+    /// Progress of one chapter, for the table of contents.
+    public func blockCounts(in chapter: Chapter) -> (done: Int, total: Int) {
+        var done = 0
+        var total = 0
+        for block in chapter.blocks where block.kind.isTranslatable && !block.text.isEmpty {
+            total += 1
+            if translatedText(for: block.id) != nil { done += 1 }
+        }
+        return (done, total)
+    }
 }

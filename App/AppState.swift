@@ -24,6 +24,13 @@ final class AppState {
     /// Non-fatal problems surfaced by background work.
     private(set) var lastError: String?
 
+    /// Bumped whenever finished batches change what the reader should show.
+    /// Views observe this instead of polling the store.
+    private(set) var translationRevision = 0
+
+    /// True while an import is running, so the UI can disable the picker.
+    private(set) var isImporting = false
+
     struct Banner: Identifiable, Equatable {
         enum Kind { case info, error }
         let id = UUID()
@@ -73,6 +80,32 @@ final class AppState {
 
     func show(_ text: String, kind: Banner.Kind = .info) {
         banner = Banner(kind: kind, text: text)
+    }
+
+    /// Notifies the UI that finished batches changed what the reader shows.
+    func noteTranslationChanged() {
+        translationRevision &+= 1
+        reloadLibrary()
+    }
+
+    /// Imports one file, reporting the outcome through the banner.
+    @discardableResult
+    func importBook(from url: URL) async -> String? {
+        guard !isImporting else { return nil }
+        isImporting = true
+        defer { isImporting = false }
+        do {
+            let bookId = try ImportCoordinator.importBook(from: url, into: self)
+            if let meta = books.loadMeta(bookId) {
+                let batches = books.loadPlan(bookId)?.batches.count ?? 0
+                show("«\(meta.title)» добавлена: \(meta.chapterCount) глав, \(batches) батчей")
+            }
+            return bookId
+        } catch {
+            let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            show(message, kind: .error)
+            return nil
+        }
     }
 
     func deleteBook(_ bookId: String) {

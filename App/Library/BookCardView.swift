@@ -31,30 +31,9 @@ struct BookCardView: View {
         }
     }
 
-    @ViewBuilder
     private var cover: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 8).fill(Theme.card)
-            if let url = entry.coverURL {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image.resizable().aspectRatio(contentMode: .fill)
-                    default:
-                        Image(systemName: "book.closed")
-                            .font(.title)
-                            .foregroundStyle(Theme.secondaryText)
-                    }
-                }
-            } else {
-                Image(systemName: "book.closed")
-                    .font(.title)
-                    .foregroundStyle(Theme.secondaryText)
-            }
-        }
-        .aspectRatio(2.0 / 3.0, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.hairline))
+        CoverThumbnail(bookId: entry.id, coverPath: entry.coverPath)
+            .aspectRatio(2.0 / 3.0, contentMode: .fit)
     }
 }
 
@@ -90,19 +69,5 @@ struct StatusChip: View {
         case .waitingAuth: return Theme.warning
         case .failed: return Theme.danger
         }
-    }
-}
-
-extension LibraryEntry {
-    /// Absolute file URL for the cover image, relative to the app's Documents
-    /// directory. Nil when the book has no cover.
-    var coverURL: URL? {
-        guard let coverPath, !coverPath.isEmpty else { return nil }
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let url = docs
-            .appendingPathComponent("Books", isDirectory: true)
-            .appendingPathComponent(id, isDirectory: true)
-            .appendingPathComponent(coverPath)
-        return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 }

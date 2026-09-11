@@ -74,4 +74,52 @@ final class TranslationMapTests: XCTestCase {
         XCTAssertEqual(map.doneBatchCount, 1)
         XCTAssertEqual(map.totalBatchCount, 2)
     }
+
+    // MARK: - Chapter completeness
+
+    private func chapter(_ blocks: [Block]) -> Chapter {
+        Chapter(index: 0, title: "T", blocks: blocks)
+    }
+
+    func testChapterIsCompleteOnlyWhenEveryTranslatableBlockIsTranslated() {
+        let blocks = [
+            Block(id: 0, kind: .heading, text: "Title"),
+            Block(id: 1, kind: .paragraph, text: "Body"),
+            Block(id: 2, kind: .image, text: "", imageRef: "images/x.jpg"),
+        ]
+        let map = TranslationMap(
+            plan: plan([(0, [PlanUnit(block: 0, part: 0, text: "Title"),
+                             PlanUnit(block: 1, part: 0, text: "Body")])], done: [0]),
+            results: [0: BatchResult(index: 0, modelId: "m", translations: ["Заголовок", "Текст"])])
+        XCTAssertTrue(map.isTranslated(chapter(blocks)),
+                      "a non-translatable image must not block completeness")
+
+        let partial = TranslationMap(
+            plan: plan([(0, [PlanUnit(block: 0, part: 0, text: "Title")])], done: [0]),
+            results: [0: BatchResult(index: 0, modelId: "m", translations: ["Заголовок"])])
+        XCTAssertFalse(partial.isTranslated(chapter(blocks)), "the untranslated body still counts")
+    }
+
+    func testChapterWithoutTranslatableTextCountsAsComplete() {
+        let blocks = [
+            Block(id: 0, kind: .hr, text: ""),
+            Block(id: 1, kind: .image, text: "", imageRef: "images/x.jpg"),
+        ]
+        XCTAssertTrue(TranslationMap().isTranslated(chapter(blocks)))
+    }
+
+    func testBlockCountsIgnoreEmptyAndNonTranslatableBlocks() {
+        let blocks = [
+            Block(id: 0, kind: .paragraph, text: "one"),
+            Block(id: 1, kind: .paragraph, text: ""),
+            Block(id: 2, kind: .table, text: "", rawHTML: "<table/>"),
+            Block(id: 3, kind: .paragraph, text: "two"),
+        ]
+        let map = TranslationMap(
+            plan: plan([(0, [PlanUnit(block: 0, part: 0, text: "one")])], done: [0]),
+            results: [0: BatchResult(index: 0, modelId: "m", translations: ["раз"])])
+        let counts = map.blockCounts(in: chapter(blocks))
+        XCTAssertEqual(counts.total, 2, "an empty paragraph and a table are not translatable work")
+        XCTAssertEqual(counts.done, 1)
+    }
 }
