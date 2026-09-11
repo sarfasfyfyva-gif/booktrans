@@ -103,7 +103,9 @@ struct DebugView: View {
                     HStack {
                         Text(cookie.name).font(.caption.monospaced())
                         Spacer()
-                        Text(cookie.ageSeconds == 0 ? "сессионная" : "\(cookie.ageSeconds / 60) мин")
+                        Text(cookie.expiresInSeconds == 0
+                             ? "сессионная"
+                             : "истекает через \(cookie.expiresInSeconds / 60) мин")
                             .font(.caption)
                             .foregroundStyle(Theme.secondaryText)
                     }

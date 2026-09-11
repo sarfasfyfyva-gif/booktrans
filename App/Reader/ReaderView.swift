@@ -237,9 +237,14 @@ struct ReaderView: View {
         translations = TranslationMap(plan: plan, results: app.books.loadResults(bookId, plan: plan))
     }
 
+    /// Redraws only when the chapter on screen actually changed. Batches finish
+    /// for every book and every chapter, and reloading the page for each of them
+    /// would flash and re-scroll while the user is reading.
     private func reloadTranslations(redraw: Bool) async {
+        let before = currentChapter.map { translations.blockCounts(in: $0).done }
         reloadTranslationsMap()
-        if redraw { await render(preservingPosition: true) }
+        let after = currentChapter.map { translations.blockCounts(in: $0).done }
+        if redraw, before != after { await render(preservingPosition: true) }
     }
 
     private func render(

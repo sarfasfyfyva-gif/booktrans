@@ -185,6 +185,9 @@ final class GeminiSession {
             timeout: 60)
 
         let response = try await transport.send(request)
+        if response.status == 0 {
+            throw GeminiSessionError.protocolError(connectivityError(response), raw: "")
+        }
         if let httpError = GeminiResponseParser.error(forHTTPStatus: response.status) {
             throw GeminiSessionError.protocolError(httpError, raw: preview(response.raw))
         }
@@ -259,6 +262,13 @@ final class GeminiSession {
 
     // MARK: - Generation
 
+    /// True when the page could not reach Gemini at all (offline, VPN off,
+    /// timeout). Distinct from a protocol error: it must not cost retries.
+    private func connectivityError(_ response: TransportResponse) -> GeminiError {
+        GeminiError(kind: .unavailable,
+                    message: "Нет связи с Gemini. Проверьте интернет и VPN.")
+    }
+
     /// Sends one prompt as a fresh single-turn conversation and returns the text.
     func generate(prompt: String) async throws -> String {
         let started = Date()
@@ -308,6 +318,11 @@ final class GeminiSession {
             frameCount: parsed.frameCount,
             elapsedSeconds: Date().timeIntervalSince(started), at: Date())
 
+        if response.status == 0 {
+            LogStore.shared.append(level: .warn, event: "generate.offline",
+                                   fields: ["error": response.errorText ?? ""])
+            throw GeminiSessionError.protocolError(connectivityError(response), raw: "")
+        }
         if let httpError = GeminiResponseParser.error(forHTTPStatus: response.status) {
             if httpError.kind == .unauthenticated { markSignedOut() }
             throw GeminiSessionError.protocolError(httpError, raw: preview(response.raw))

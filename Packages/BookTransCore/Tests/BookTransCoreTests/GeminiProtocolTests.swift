@@ -398,6 +398,17 @@ final class GeminiResponseTests: XCTestCase {
         XCTAssertEqual(GeminiResponseParser.error(forHTTPStatus: 418)?.kind, .unknown)
     }
 
+    func testNoConnectionIsConnectivityNotAProtocolAnswer() {
+        // The transport reports status 0 for a failed fetch (offline, VPN off,
+        // timeout). Callers must not treat that as a malformed protocol reply:
+        // the queue waits instead of spending the batch's retry budget.
+        let offline = GeminiResponseParser.error(forHTTPStatus: 0)
+        XCTAssertEqual(offline?.kind, .unavailable)
+        XCTAssertFalse(offline?.isRetryableImmediately ?? true)
+        XCTAssertEqual(GeminiError.unavailable.kind, .unavailable)
+        XCTAssertTrue(GeminiError.unavailable.message.contains("VPN"))
+    }
+
     func testSuccessfulPayloadWinsOverAnEarlierErrorFrame() {
         let errorFrame = frame("[\(part(rpcId: "rpc", payload: "[]", meta: "[0,null,[[null,[1013]]]]"))]")
         let goodFrame = frame("[\(part(rpcId: "rpc", payload: "[42]"))]")

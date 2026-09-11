@@ -34,6 +34,9 @@ public struct GeminiError: Sendable, Equatable {
         case badModelHeader
         /// Reject code 7, or HTTP 401/403.
         case unauthenticated
+        /// No connection at all: offline, VPN off, timeout. Not the protocol's
+        /// fault, so it must not consume the retry budget.
+        case unavailable
         case unknown
     }
 
@@ -72,6 +75,9 @@ public struct GeminiError: Sendable, Equatable {
 
     public static let unauthenticated = GeminiError(
         kind: .unauthenticated, message: "Нужно войти в Gemini.")
+
+    public static let unavailable = GeminiError(
+        kind: .unavailable, message: "Нет связи с Gemini. Проверьте интернет и VPN.")
 
     public var isRetryableImmediately: Bool {
         kind == .temporary || kind == .unknown
@@ -196,6 +202,9 @@ public enum GeminiResponseParser {
     /// HTTP-level classification, used before looking at the body.
     public static func error(forHTTPStatus status: Int) -> GeminiError? {
         switch status {
+        // The transport reports 0 when the page could not reach the server at
+        // all; that is connectivity, not a protocol answer.
+        case 0: return .unavailable
         case 200...299: return nil
         case 401, 403: return .unauthenticated
         case 429: return GeminiError(kind: .usageLimit, code: 429,

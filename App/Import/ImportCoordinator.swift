@@ -2,56 +2,82 @@ import Foundation
 import BookTransCore
 
 /// Turns a picked or shared file into a book on disk: original copy, parsed
-/// chapters, images, batch plan and library entry.
-@MainActor
-struct ImportCoordinator {
+/// chapters, images and batch plan.
+///
+/// Deliberately not main-actor isolated. Unzipping an EPUB, parsing XML,
+/// base64-decoding `<binary>` elements and re-encoding images is seconds of work
+/// for a large book; running it on the main thread would freeze the UI and can
+/// trip the iOS watchdog. `AppState` runs `prepare` off the main actor and only
+/// touches the library list afterwards.
+enum ImportCoordinator {
     enum ImportError: LocalizedError {
         case unsupportedFormat(String)
         case unreadable(String)
         case noContent
+        case emptyArchive(String)
 
         var errorDescription: String? {
             switch self {
             case .unsupportedFormat(let ext):
                 return ext.isEmpty
                     ? "Не удалось определить формат файла. Поддерживаются FB2 и EPUB."
-                    : "Формат «.\(ext)» не поддерживается. Нужен FB2 или EPUB."
+                    : "Формат «.\(ext)» не поддерживается. Нужен FB2 (в том числе .fb2.zip) или EPUB."
             case .unreadable(let reason):
                 return "Не удалось прочитать файл: \(reason)"
             case .noContent:
                 return "В файле не найдено текста для чтения."
+            case .emptyArchive(let name):
+                return "В архиве «\(name)» не найден файл .fb2."
             }
         }
     }
 
-    /// Imports one file and returns the new book id.
-    @discardableResult
-    static func importBook(from source: URL, into app: AppState) throws -> String {
+    /// Everything the main actor needs to add the book to the library.
+    struct Prepared: Sendable {
+        var bookId: String
+        var meta: BookMeta
+        var plan: BatchPlan
+        var entry: LibraryEntry
+        var warnings: [String]
+    }
+
+    // MARK: - Entry point
+
+    /// Reads, parses and writes one book. Safe to call off the main actor.
+    static func prepare(source: URL, bookId: String, paths: BookPaths) throws -> Prepared {
         let needsScopedAccess = source.startAccessingSecurityScopedResource()
         defer { if needsScopedAccess { source.stopAccessingSecurityScopedResource() } }
 
         guard let data = FileStore.readData(source) else {
             throw ImportError.unreadable("файл недоступен")
         }
-        let format = try detectFormat(fileName: source.lastPathComponent, data: data)
+        let fileName = source.lastPathComponent
+        var format = try detectFormat(fileName: fileName, data: data)
+        var payload = data
 
-        let bookId = UUID().uuidString
-        let paths = app.paths
+        // A `.fb2.zip` holds exactly one book; unpack it once, up front, so the
+        // rest of the pipeline only ever sees a plain FB2 document.
+        if fileName.lowercased().hasSuffix(".fb2.zip") {
+            payload = try unpackInnerFB2(data: data, bookId: bookId, paths: paths)
+            format = .fb2
+        }
+
+        let books = BookStore(paths: paths)
         do {
             try paths.createDirectories(forBook: bookId)
 
             // 1. Keep the original next to everything derived from it.
-            FileStore.writeData(data, to: paths.original(bookId, ext: format.fileExtension))
+            FileStore.writeData(payload, to: paths.original(bookId, ext: format.fileExtension))
 
             // 2. Parse into chapters and images.
-            let parsed = try parse(data: data, format: format, bookId: bookId, paths: paths)
+            let parsed = try parse(data: payload, format: format, bookId: bookId, paths: paths)
 
             // 3. Persist chapters, then the plan derived from them.
-            guard app.books.saveChapters(parsed.chapters, bookId: bookId) else {
+            guard books.saveChapters(parsed.chapters, bookId: bookId) else {
                 throw ImportError.unreadable("не удалось записать главы")
             }
             let plan = Chunker.plan(chapters: parsed.chapters)
-            app.books.savePlan(plan, bookId: bookId)
+            books.savePlan(plan, bookId: bookId)
 
             let meta = BookMeta(
                 id: bookId,
@@ -64,9 +90,9 @@ struct ImportCoordinator {
                 chapterCount: parsed.chapters.count,
                 batchCount: plan.batches.count,
                 coverPath: parsed.coverPath)
-            app.books.saveMeta(meta)
+            books.saveMeta(meta)
 
-            _ = app.library.upsert(LibraryEntry(
+            let entry = LibraryEntry(
                 id: bookId,
                 title: meta.title,
                 author: meta.author,
@@ -74,8 +100,7 @@ struct ImportCoordinator {
                 batchesDone: 0,
                 batchesTotal: plan.batches.count,
                 status: .idle,
-                lastOpenedAt: Date()))
-            app.reloadLibrary()
+                lastOpenedAt: Date())
 
             LogStore.shared.append(level: .info, event: "import.ok", fields: [
                 "id": bookId,
@@ -88,10 +113,11 @@ struct ImportCoordinator {
             for warning in parsed.warnings.prefix(20) {
                 CoreLog.warn("import: \(warning)")
             }
-            return bookId
+            return Prepared(bookId: bookId, meta: meta, plan: plan, entry: entry,
+                            warnings: parsed.warnings)
         } catch {
-            // A failed import must not leave a half-built book in the library.
-            try? app.books.deleteBook(bookId)
+            // A failed import must not leave a half-built book on disk.
+            try? books.deleteBook(bookId)
             LogStore.shared.append(level: .error, event: "import.failed",
                                    fields: ["error": "\(error)"])
             throw error
@@ -100,15 +126,22 @@ struct ImportCoordinator {
 
     // MARK: - Format detection
 
-    /// Extension first, then content: `.fb2` and `.epub` are the only names we
-    /// accept, but a `.xml` file that is really FB2 is common enough to matter.
+    /// Extension first, then content: `.fb2`, `.fb2.zip` and `.epub` are the
+    /// names we accept, but a `.xml` file that is really FB2 is common enough to
+    /// matter.
     static func detectFormat(fileName: String, data: Data) throws -> BookFormat {
+        let lower = fileName.lowercased()
         let extensionName = (fileName as NSString).pathExtension.lowercased()
+
         switch extensionName {
-        case "fb2", "fb2.zip": return .fb2
+        case "fb2": return .fb2
         case "epub": return .epub
         default: break
         }
+        // `.fb2.zip` has to be tested against the whole name: `pathExtension`
+        // only returns the part after the last dot, i.e. "zip".
+        if lower.hasSuffix(".fb2.zip") { return .fb2 }
+
         // ZIP magic means EPUB; an XML prologue or a FictionBook root means FB2.
         if data.starts(with: [0x50, 0x4B, 0x03, 0x04]) { return .epub }
         let head = data.prefix(4096)
@@ -119,6 +152,29 @@ struct ImportCoordinator {
             }
         }
         throw ImportError.unsupportedFormat(extensionName)
+    }
+
+    /// Reads the single `.fb2` out of a `.fb2.zip`.
+    private static func unpackInnerFB2(data: Data, bookId: String, paths: BookPaths) throws -> Data {
+        let archive = paths.bookDir(bookId).appendingPathComponent("book.fb2.zip")
+        let destination = paths.bookDir(bookId).appendingPathComponent("fb2zip", isDirectory: true)
+        defer {
+            FileStore.remove(archive)
+            try? FileManager.default.removeItem(at: destination)
+        }
+        guard FileStore.writeData(data, to: archive) else {
+            throw ImportError.unreadable("не удалось записать архив")
+        }
+        try EPUBUnpacker.unpack(archive: archive, to: destination)
+
+        let entries = FileManager.default.enumerator(at: destination, includingPropertiesForKeys: nil)?
+            .compactMap { $0 as? URL } ?? []
+        guard let fb2 = entries.first(where: { $0.pathExtension.lowercased() == "fb2" }),
+              let inner = FileStore.readData(fb2)
+        else {
+            throw ImportError.emptyArchive("книга.fb2.zip")
+        }
+        return inner
     }
 
     // MARK: - Parsing

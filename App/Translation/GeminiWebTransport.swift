@@ -75,9 +75,12 @@ final class GeminiWebTransport {
     /// Reads `window.WIZ_global_data`, falling back to scraping the HTML for the
     /// parameter literals when the global is not populated.
     func readWizParameters(config: GeminiConfig) async throws -> WizParameters {
+        // `callAsyncJavaScript` binds each dictionary key as a *named* parameter
+        // of the generated function, so the names below must match the argument
+        // keys exactly. (`arguments[0]` does not exist here: the body runs inside
+        // an arrow function, which has no `arguments` binding of its own.)
         let script = """
         const g = window.WIZ_global_data || {};
-        const keys = arguments[0];
         const pick = (name) => {
           const value = g[name];
           return (typeof value === "string") ? value : "";
@@ -98,7 +101,7 @@ final class GeminiWebTransport {
         return JSON.stringify({ at, bl, sid, hl, title, href: location.href });
         """
         let arguments: [String: Any] = [
-            "0": [
+            "keys": [
                 "at": config.wizAt,
                 "build": config.wizBuild,
                 "session": config.wizSession,
@@ -185,7 +188,9 @@ final class GeminiWebTransport {
             "ms": String(payload.elapsedMs ?? 0),
         ])
         if payload.status == 0 {
-            // A page-level failure (CSP, navigation, offline) surfaces here.
+            // A page-level failure: offline, VPN off, timeout, CSP. The reason is
+            // in `errorText` and the caller classifies it as a connectivity
+            // problem rather than a protocol error.
             return TransportResponse(status: 0, raw: payload.raw,
                                      errorText: payload.error ?? "fetch failed")
         }
@@ -216,7 +221,9 @@ final class GeminiWebTransport {
 
     struct CookieInfo: Sendable {
         var name: String
-        var ageSeconds: Int
+        /// Seconds until expiry; 0 for a session cookie. WebKit does not expose
+        /// a cookie's creation time, so this is the only age-like value there is.
+        var expiresInSeconds: Int
         var domain: String
     }
 
@@ -230,20 +237,10 @@ final class GeminiWebTransport {
             .filter { $0.domain.contains("google.com") }
             .map { cookie in
                 CookieInfo(name: cookie.name,
-                           ageSeconds: cookie.expiresDate.map { Int(now.timeIntervalSince($0)) } ?? 0,
+                           expiresInSeconds: cookie.expiresDate.map { Int($0.timeIntervalSince(now)) } ?? 0,
                            domain: cookie.domain)
             }
             .sorted { $0.name < $1.name }
-    }
-
-    /// True when the rotating cookie is older than 20 minutes and should be
-    /// refreshed before the next request.
-    func shouldRotateCookies() async -> Bool {
-        let cookies = await cookies()
-        guard let rotating = cookies.first(where: { $0.name == "__Secure-1PSIDTS" }) else { return true }
-        // `expiresDate` is in the future for session cookies; use the presence
-        // of a fresh value rather than a hard clock, and rotate on a timer.
-        return abs(rotating.ageSeconds) > 20 * 60
     }
 
     func clearWebsiteData() async {
@@ -290,8 +287,10 @@ enum TransportError: LocalizedError {
 private final class NavigationDelegate: NSObject, WKNavigationDelegate {
     private var continuation: CheckedContinuation<Void, Error>?
 
+    /// Supersedes any in-flight wait. The earlier caller is resumed with an error
+    /// instead of being left suspended forever.
     func reset() {
-        continuation = nil
+        resume(throwing: TransportError.navigationFailed("переход отменён новым запросом"))
     }
 
     func waitForNavigation(timeout: TimeInterval) async throws {

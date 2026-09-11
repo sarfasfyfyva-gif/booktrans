@@ -13,6 +13,9 @@ final class TranslationQueue {
     /// Backoff after a failed attempt, indexed by attempt number.
     static let retryDelays: [Duration] = [.seconds(15), .seconds(60), .seconds(300)]
     static let maxAttempts = 3
+    /// How long to wait before retrying after a connectivity failure. Short,
+    /// because the user may flip the VPN back on at any moment.
+    static let connectivityRetryDelay: TimeInterval = 60
 
     private(set) var status: QueueStatus = .idle
     private(set) var message: String?
@@ -65,8 +68,11 @@ final class TranslationQueue {
         setStatus(.running, message: nil, bookId: bookId)
         worker = Task { [weak self] in
             await self?.run(bookId: bookId)
-            self?.worker = nil
-            self?.isWorking = false
+            // Cancellation is cooperative: a cancelled task can finish long after
+            // its replacement started, so it must not clear the new worker's flag.
+            guard let self, !Task.isCancelled else { return }
+            self.worker = nil
+            self.isWorking = false
         }
     }
 
@@ -158,6 +164,13 @@ final class TranslationQueue {
         }
 
         while !Task.isCancelled {
+            // The book may have been deleted while a request was in flight; the
+            // worker must not resurrect its directory and keep spending quota.
+            guard library.load().contains(where: { $0.id == bookId }) else {
+                CoreLog.info("queue: book \(bookId) is gone from the library, stopping")
+                setStatus(.idle, message: nil, bookId: nil)
+                return
+            }
             if isPaused {
                 await finish(bookId: bookId, plan: plan, reason: .paused)
                 return
@@ -200,7 +213,7 @@ final class TranslationQueue {
 
                 let waiting: QueueStatus?
                 switch error.kind {
-                case .usageLimit, .ipRegion: waiting = .waitingQuota
+                case .usageLimit, .ipRegion, .unavailable: waiting = .waitingQuota
                 case .unauthenticated: waiting = .waitingAuth
                 default: waiting = nil
                 }
@@ -279,7 +292,12 @@ final class TranslationQueue {
 
         // 2. Translate.
         let glossary = books.loadGlossary(bookId)
-        let prompt = PromptBuilder.translationPrompt(units: batch.units, glossary: glossary)
+        // The previous batch's text is what keeps a term used just before this
+        // batch inside a truncated glossary (docs/SPEC.md §8.4).
+        let previousUnits = books.loadPlan(bookId)?
+            .batches.first { $0.index == batch.index - 1 }?.units ?? []
+        let prompt = PromptBuilder.translationPrompt(
+            units: batch.units, glossary: glossary, previousUnits: previousUnits)
         do {
             let raw = try await provider.complete(prompt: prompt)
             switch ResponseParser.parse(raw, expectedCount: batch.units.count) {
@@ -322,6 +340,26 @@ final class TranslationQueue {
         batch: Batch, error: GeminiError, bookId: String, detail: String
     ) -> Outcome {
         var batch = batch
+
+        if error.kind == .unavailable {
+            // Nothing was actually asked of the model, so this must not spend an
+            // attempt: an outage would otherwise fail batches permanently.
+            let restored = max(0, batch.attempts - 1)
+            batch.attempts = restored
+            batch.status = .pending
+            batch.error = error.message
+            books.updateBatch(bookId: bookId, index: batch.index) { stored in
+                stored.attempts = restored
+                stored.status = .pending
+                stored.error = error.message
+            }
+            LogStore.shared.append(level: .warn, event: "batch.offline", fields: [
+                "batch": String(batch.index),
+                "detail": detail,
+            ])
+            return .retryLater(TranslationQueue.connectivityRetryDelay, error, batch)
+        }
+
         let index = min(batch.attempts - 1, TranslationQueue.retryDelays.count - 1)
 
         if batch.attempts >= TranslationQueue.maxAttempts {
@@ -345,7 +383,7 @@ final class TranslationQueue {
         switch error.kind {
         case .usageLimit, .ipRegion:
             delay = Double(settings.retryLimitMinutes) * 60
-        case .unauthenticated:
+        case .unauthenticated, .unavailable:
             delay = 0
         default:
             delay = TranslationQueue.retryDelays[index].seconds

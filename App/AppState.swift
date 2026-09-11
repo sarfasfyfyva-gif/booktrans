@@ -120,13 +120,22 @@ final class AppState {
         guard !isImporting else { return nil }
         isImporting = true
         defer { isImporting = false }
+
+        let paths = self.paths
+        let bookId = UUID().uuidString
         do {
-            let bookId = try ImportCoordinator.importBook(from: url, into: self)
-            if let meta = books.loadMeta(bookId) {
-                let batches = books.loadPlan(bookId)?.batches.count ?? 0
-                show("«\(meta.title)» добавлена: \(meta.chapterCount) глав, \(batches) батчей")
-            }
-            return bookId
+            // Unzipping, XML parsing and image re-encoding are seconds of work on
+            // the main thread would freeze the UI and can trip the watchdog, so
+            // the whole import runs detached; only the library update returns.
+            let prepared = try await Task.detached(priority: .userInitiated) {
+                try ImportCoordinator.prepare(source: url, bookId: bookId, paths: paths)
+            }.value
+
+            _ = library.upsert(prepared.entry)
+            reloadLibrary()
+            show("«\(prepared.meta.title)» добавлена: \(prepared.meta.chapterCount) глав, "
+                 + "\(prepared.plan.batches.count) батчей")
+            return prepared.bookId
         } catch {
             let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             show(message, kind: .error)
@@ -135,6 +144,11 @@ final class AppState {
     }
 
     func deleteBook(_ bookId: String) {
+        // Stop first: a running worker holds the plan in memory and would keep
+        // translating (and re-creating files for) a book that is already gone.
+        if queue.activeBookId == bookId {
+            queue.stop()
+        }
         do {
             try books.deleteBook(bookId)
             _ = library.remove(id: bookId)
