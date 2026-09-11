@@ -111,9 +111,10 @@ struct ImportCoordinator {
         }
         // ZIP magic means EPUB; an XML prologue or a FictionBook root means FB2.
         if data.starts(with: [0x50, 0x4B, 0x03, 0x04]) { return .epub }
-        if let head = String(data: data.prefix(4096), encoding: .utf8)?.lowercased()
-            ?? EncodingDetect.decode(data).map({ String($0.text.prefix(4096)).lowercased() }) {
-            if head.contains("<fictionbook") || (head.contains("<?xml") && head.contains("<body")) {
+        let head = data.prefix(4096)
+        if let text = String(data: head, encoding: .utf8)?.lowercased()
+            ?? EncodingDetect.decode(head)?.text.lowercased() {
+            if text.contains("<fictionbook") || (text.contains("<?xml") && text.contains("<body")) {
                 return .fb2
             }
         }

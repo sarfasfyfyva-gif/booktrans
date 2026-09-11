@@ -4,6 +4,7 @@ import SwiftUI
 
 /// Bridges the app's stored preferences into the reader page's configuration, so
 /// the WebView and the native chrome stay in step.
+@MainActor
 enum ReaderTheme {
     static func configuration(
         settings: AppSettings, showTranslation: Bool

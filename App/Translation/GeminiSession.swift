@@ -55,11 +55,14 @@ final class GeminiSession {
     init(paths: BookPaths, transport: GeminiWebTransport) {
         self.paths = paths
         self.transport = transport
-        self.config = GeminiConfigLoader.resolve(override: FileStore.readData(paths.geminiConfigOverride))
+        // Read through a local: a stored property cannot be read before every
+        // stored property has been initialized.
+        let resolved = GeminiConfigLoader.resolve(override: FileStore.readData(paths.geminiConfigOverride))
             ?? GeminiConfig.lastResort
-        self.models = config.models
+        self.config = resolved
+        self.models = resolved.models
         let stored = UserDefaults.standard.string(forKey: Self.modelDefaultsKey)
-        self.selectedModelId = stored ?? config.defaultModel
+        self.selectedModelId = stored ?? resolved.defaultModel
     }
 
     var selectedModel: GeminiModel? { config.model(id: selectedModelId) }
