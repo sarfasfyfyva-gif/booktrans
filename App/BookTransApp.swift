@@ -4,6 +4,7 @@ import BookTransCore
 @main
 struct BookTransApp: App {
     @State private var app = AppState()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
@@ -12,18 +13,27 @@ struct BookTransApp: App {
                 .preferredColorScheme(.dark)
                 .tint(Theme.accent)
         }
+        .onChange(of: scenePhase) { _, phase in
+            app.handleScenePhase(phase)
+        }
     }
 }
 
-/// Hosts the library plus the app-wide banner. The hidden Gemini transport
-/// WebView is attached here in Step 2 so it stays alive for the whole session.
+/// Hosts the library plus the app-wide banner. The Gemini WebView lives here so
+/// it stays in the view hierarchy for the whole session (a detached WebView has
+/// its JavaScript throttled, which would stall translation).
 struct RootView: View {
     @Environment(AppState.self) private var app
 
     var body: some View {
-        @Bindable var app = app
-        NavigationStack {
-            LibraryView()
+        ZStack {
+            NavigationStack {
+                LibraryView()
+            }
+            TransportHostView(webView: app.gemini.transport.webView)
+                .frame(width: 1, height: 1)
+                .opacity(0.01)
+                .allowsHitTesting(false)
         }
         .overlay(alignment: .bottom) {
             if let banner = app.banner {

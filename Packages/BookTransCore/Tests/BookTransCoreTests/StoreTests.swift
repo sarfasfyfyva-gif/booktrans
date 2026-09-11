@@ -128,8 +128,8 @@ final class StoreTests: XCTestCase {
         store.upsert(LibraryEntry(id: "a", title: "A", author: "", batchesDone: 0, batchesTotal: 0))
 
         let plan = BatchPlan(target: 4000, totalChars: 8000, batches: [
-            Batch(index: 0, chars: 4000, status: .done, units: [Unit(block: 0, part: 0, text: "x")]),
-            Batch(index: 1, chars: 4000, status: .pending, units: [Unit(block: 1, part: 0, text: "y")]),
+            Batch(index: 0, chars: 4000, status: .done, units: [PlanUnit(block: 0, part: 0, text: "x")]),
+            Batch(index: 1, chars: 4000, status: .pending, units: [PlanUnit(block: 1, part: 0, text: "y")]),
         ])
         let entries = store.refreshCounters(bookId: "a", plan: plan, status: .running)
 
@@ -147,8 +147,8 @@ final class StoreTests: XCTestCase {
 
         let plan = BatchPlan(target: 4000, totalChars: 4000, batches: [
             Batch(index: 0, chars: 4000, units: [
-                Unit(block: 0, part: 0, text: "one"),
-                Unit(block: 1, part: 0, text: "two"),
+                PlanUnit(block: 0, part: 0, text: "one"),
+                PlanUnit(block: 1, part: 0, text: "two"),
             ])
         ])
         XCTAssertTrue(store.savePlan(plan, bookId: "b"))

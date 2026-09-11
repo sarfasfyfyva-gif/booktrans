@@ -182,7 +182,7 @@ public enum BatchStatus: String, Codable, Sendable {
 
 /// One line of the model's answer. A long source block is split into several
 /// units (`part` 0..k) so that no single answer line exceeds `target` chars.
-public struct Unit: Codable, Sendable, Hashable {
+public struct PlanUnit: Codable, Sendable, Hashable {
     public var block: Int
     public var part: Int
     public var text: String
@@ -201,7 +201,7 @@ public struct Batch: Codable, Sendable, Identifiable {
     public var attempts: Int
     public var error: String?
     public var finishedAt: Date?
-    public var units: [Unit]
+    public var units: [PlanUnit]
 
     public var id: Int { index }
 
@@ -212,7 +212,7 @@ public struct Batch: Codable, Sendable, Identifiable {
         attempts: Int = 0,
         error: String? = nil,
         finishedAt: Date? = nil,
-        units: [Unit]
+        units: [PlanUnit]
     ) {
         self.index = index
         self.chars = chars
@@ -235,7 +235,7 @@ public struct Batch: Codable, Sendable, Identifiable {
         attempts = try c.decodeIfPresent(Int.self, forKey: .attempts) ?? 0
         error = try c.decodeIfPresent(String.self, forKey: .error)
         finishedAt = try c.decodeIfPresent(Date.self, forKey: .finishedAt)
-        units = try c.decodeIfPresent([Unit].self, forKey: .units) ?? []
+        units = try c.decodeIfPresent([PlanUnit].self, forKey: .units) ?? []
     }
 }
 

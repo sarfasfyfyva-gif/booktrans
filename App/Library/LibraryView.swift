@@ -15,6 +15,16 @@ struct LibraryView: View {
         .navigationTitle("BookTrans")
         .navigationBarTitleDisplayMode(.inline)
         .background(Theme.background)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink {
+                    SettingsView()
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+                .accessibilityLabel("Настройки")
+            }
+        }
     }
 }
 

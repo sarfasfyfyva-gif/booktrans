@@ -18,6 +18,9 @@ let package = Package(
             name: "BookTransCore",
             dependencies: [
                 .product(name: "ZIPFoundation", package: "ZIPFoundation", condition: .when(platforms: [.macOS, .iOS, .linux])),
+            ],
+            resources: [
+                .copy("Resources/gemini-web.json"),
             ]
         ),
         .testTarget(

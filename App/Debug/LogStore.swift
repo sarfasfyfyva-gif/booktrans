@@ -144,6 +144,12 @@ final class LogStore: @unchecked Sendable {
 
     // MARK: - Redaction
 
+    /// Logs only the host of a URL: paths and query strings can carry tokens.
+    func redactedHost(_ urlString: String) -> String {
+        guard let url = URL(string: urlString), let host = url.host else { return "(invalid url)" }
+        return host
+    }
+
     private func redactLocked(_ text: String) -> String {
         guard !secrets.isEmpty, !text.isEmpty else { return text }
         var result = text

@@ -5,7 +5,7 @@ import XCTest
 /// spec is that a block is only translated once *all* of its units are in, so
 /// that a partly translated paragraph never renders as a half-Russian mix.
 final class TranslationMapTests: XCTestCase {
-    private func plan(_ batches: [(Int, [Unit])], done: Set<Int> = []) -> BatchPlan {
+    private func plan(_ batches: [(Int, [PlanUnit])], done: Set<Int> = []) -> BatchPlan {
         BatchPlan(target: 4000, totalChars: 0, batches: batches.map { index, units in
             Batch(index: index,
                   chars: units.reduce(0) { $0 + $1.text.count },
@@ -15,7 +15,7 @@ final class TranslationMapTests: XCTestCase {
     }
 
     func testSingleUnitBlockUsesTranslation() {
-        let plan = plan([(0, [Unit(block: 5, part: 0, text: "hello")])], done: [0])
+        let plan = plan([(0, [PlanUnit(block: 5, part: 0, text: "hello")])], done: [0])
         let map = TranslationMap(plan: plan, results: [0: BatchResult(index: 0, modelId: "m",
                                                                      translations: ["привет"])])
         XCTAssertEqual(map.translatedText(for: 5), "привет")
@@ -24,8 +24,8 @@ final class TranslationMapTests: XCTestCase {
     func testSplitBlockJoinsPartsInPartOrderWithSpace() {
         // Units deliberately listed out of `part` order to prove sorting is by part.
         let plan = plan([(0, [
-            Unit(block: 9, part: 1, text: "second half"),
-            Unit(block: 9, part: 0, text: "first half"),
+            PlanUnit(block: 9, part: 1, text: "second half"),
+            PlanUnit(block: 9, part: 0, text: "first half"),
         ])], done: [0])
         let map = TranslationMap(plan: plan, results: [
             0: BatchResult(index: 0, modelId: "m", translations: ["вторая часть", "первая часть"])
@@ -35,8 +35,8 @@ final class TranslationMapTests: XCTestCase {
 
     func testPartiallyTranslatedBlockFallsBackToNil() {
         let plan = plan([
-            (0, [Unit(block: 3, part: 0, text: "a")]),
-            (1, [Unit(block: 3, part: 1, text: "b")]),
+            (0, [PlanUnit(block: 3, part: 0, text: "a")]),
+            (1, [PlanUnit(block: 3, part: 1, text: "b")]),
         ], done: [0])
         let map = TranslationMap(plan: plan, results: [
             0: BatchResult(index: 0, modelId: "m", translations: ["А"]),
@@ -47,8 +47,8 @@ final class TranslationMapTests: XCTestCase {
     }
 
     func testResultWithWrongTranslationCountIsIgnored() {
-        let plan = plan([(0, [Unit(block: 1, part: 0, text: "a"),
-                              Unit(block: 2, part: 0, text: "b")])], done: [0])
+        let plan = plan([(0, [PlanUnit(block: 1, part: 0, text: "a"),
+                              PlanUnit(block: 2, part: 0, text: "b")])], done: [0])
         let map = TranslationMap(plan: plan, results: [
             0: BatchResult(index: 0, modelId: "m", translations: ["only one"]),
         ])
@@ -64,9 +64,9 @@ final class TranslationMapTests: XCTestCase {
     }
 
     func testUntranslatedBlockIdsAreAscendingAndOnlyCoverPlan() {
-        let plan = plan([(0, [Unit(block: 7, part: 0, text: "x"),
-                              Unit(block: 2, part: 0, text: "y")]),
-                         (1, [Unit(block: 5, part: 0, text: "z")])], done: [0])
+        let plan = plan([(0, [PlanUnit(block: 7, part: 0, text: "x"),
+                              PlanUnit(block: 2, part: 0, text: "y")]),
+                         (1, [PlanUnit(block: 5, part: 0, text: "z")])], done: [0])
         let map = TranslationMap(plan: plan, results: [
             0: BatchResult(index: 0, modelId: "m", translations: ["X", "Y"]),
         ])

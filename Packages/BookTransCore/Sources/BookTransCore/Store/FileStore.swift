@@ -1,4 +1,9 @@
 import Foundation
+#if canImport(Glibc)
+import Glibc
+#elseif canImport(Darwin)
+import Darwin
+#endif
 
 /// Atomic JSON read/write.
 ///
@@ -16,10 +21,17 @@ public enum FileStore {
         let tmp = url.deletingLastPathComponent()
             .appendingPathComponent(".\(url.lastPathComponent).tmp-\(UUID().uuidString)")
         do {
-            try data.write(to: tmp, options: .atomic)
-            // `replaceItemAt` keeps the destination's identity and is atomic on
-            // both APFS and ext4 when the temp file is a sibling.
-            _ = try fm.replaceItemAt(url, withItemAt: tmp)
+            try data.write(to: tmp)
+            // rename(2) replaces the destination atomically whether or not it
+            // already exists. Foundation's `replaceItemAt` cannot be used here:
+            // it requires an existing destination and fails on Linux when the
+            // file is new.
+            guard rename(tmp.path, url.path) == 0 else {
+                let code = errno
+                try? fm.removeItem(at: tmp)
+                throw NSError(domain: NSPOSIXErrorDomain, code: Int(code),
+                              userInfo: [NSFilePathErrorKey: url.path])
+            }
         } catch {
             try? fm.removeItem(at: tmp)
             throw error

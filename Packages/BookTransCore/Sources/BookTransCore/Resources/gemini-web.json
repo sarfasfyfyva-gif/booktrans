@@ -1,0 +1,25 @@
+{
+  "init": "https://gemini.google.com/app",
+  "generate": "https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate",
+  "batchexecute": "https://gemini.google.com/_/BardChatUi/data/batchexecute",
+  "rotateCookies": "https://accounts.google.com/RotateCookies",
+  "rpc": {
+    "status": "otAQ7b",
+    "usage": "jSf9Qc",
+    "quota": "qpEbW"
+  },
+  "wizKeys": {
+    "at": "SNlM0e",
+    "build": "cfb2h",
+    "session": "FdrFJe",
+    "lang": "TuX5cc"
+  },
+  "models": [
+    { "id": "56fdd199312815e2", "label": "Flash (подписка)", "capacity": 4, "number": 1 },
+    { "id": "e6fa609c3fa255c0", "label": "Pro (подписка)", "capacity": 4, "number": 3 },
+    { "id": "8c46e95b1a07cecc", "label": "Flash Lite (подписка)", "capacity": 4, "number": 6 },
+    { "id": "fbb127bbb056c959", "label": "Flash (free)", "capacity": 1, "number": 1 }
+  ],
+  "defaultModel": "56fdd199312815e2",
+  "prompts": { "version": 1 }
+}
