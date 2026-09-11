@@ -123,7 +123,7 @@ final class TranslationQueue {
             books.deleteResult(bookId, index: index)
         }
         books.savePlan(plan, bookId: bookId)
-        _ = library.refreshCounters(bookId: bookId, plan: plan, status: .pending)
+        _ = library.refreshCounters(bookId: bookId, plan: plan, status: .idle)
         notBefore = nil
         if !isWorking { start(bookId: bookId) }
     }
@@ -266,7 +266,7 @@ final class TranslationQueue {
         guard let running = books.markBatchRunning(bookId: bookId, index: batch.index)?
             .batches.first(where: { $0.index == batch.index })
         else { return .giveUp("план изменился", batch) }
-        let batch = running
+        var batch = running
 
         // 1. Lookahead terminology, once per batch.
         if !batch.lookaheadDone, !batch.units.isEmpty {
