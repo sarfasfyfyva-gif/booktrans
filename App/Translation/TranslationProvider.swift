@@ -76,10 +76,9 @@ final class MockTranslationProvider: TranslationProvider {
         }
     }
 
-    /// The last line of the prompt is the JSON array of block texts.
+    /// The blocks are read back out of the prompt itself, so a prompt-building
+    /// regression shows up here too. `PromptBuilder` owns the format.
     static func blocks(in prompt: String) -> [String] {
-        let lines = prompt.split(separator: "\n", omittingEmptySubsequences: false)
-        guard let last = lines.last, let data = last.data(using: .utf8) else { return [] }
-        return (try? JSONDecoder().decode([String].self, from: data)) ?? []
+        PromptBuilder.blockTexts(in: prompt) ?? []
     }
 }

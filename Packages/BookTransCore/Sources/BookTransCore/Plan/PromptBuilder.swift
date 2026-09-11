@@ -51,6 +51,36 @@ public enum PromptBuilder {
         return lines.joined(separator: "\n")
     }
 
+    /// Reads the `[БЛОКИ]` array back out of a built prompt.
+    ///
+    /// The prompt layout is this type's contract, so its inverse lives here too:
+    /// the mock translator and the integration tests both need it, and reading a
+    /// prompt back is what proves the JSON escaping round-trips.
+    ///
+    /// The `[БЛОКИ]` marker is preferred, with a fall back to the last line that
+    /// decodes as a string array — a retry prompt appends a reminder after the
+    /// blocks, so "the last line" is not the blocks there.
+    public static func blockTexts(in prompt: String) -> [String]? {
+        let lines = prompt.split(separator: "\n", omittingEmptySubsequences: false)
+        if let marker = lines.lastIndex(where: {
+            $0.trimmingCharacters(in: .whitespaces) == "[БЛОКИ]"
+        }) {
+            let next = lines.index(after: marker)
+            if next < lines.endIndex, let decoded = decodeBlockLine(String(lines[next])) {
+                return decoded
+            }
+        }
+        for line in lines.reversed() {
+            if let decoded = decodeBlockLine(String(line)) { return decoded }
+        }
+        return nil
+    }
+
+    private static func decodeBlockLine(_ line: String) -> [String]? {
+        guard line.hasPrefix("["), let data = line.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode([String].self, from: data)
+    }
+
     /// Lookahead terminology extraction for one batch.
     public static func termExtractionPrompt(units: [PlanUnit]) -> String {
         let fragment = units.map(\.text).joined(separator: "\n\n")
