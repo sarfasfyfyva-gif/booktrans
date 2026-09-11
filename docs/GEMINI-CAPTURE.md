@@ -36,11 +36,16 @@
 |`x-goog-ext-525001261-jspb`|заголовок запроса|форма литерала в `GeminiProtocol.generateHeaders` (файл `Net/GeminiProtocol.swift`)|
 |`x-goog-ext-525005358-jspb`|заголовок|там же|
 |`x-goog-ext-73010989-jspb`, `x-goog-ext-73010990-jspb`|заголовки|там же|
-|id модели|4-й элемент массива в `x-goog-ext-525001261-jspb` (16 hex-символов)|`models[].id`|
-|`number` модели|15-й элемент того же массива|`models[].number`|
-|`capacity`|12-й элемент того же массива|`models[].capacity`|
+|id модели|`x-goog-ext-525001261-jspb`, индекс **4** (16 hex-символов)|`models[].id`|
+|`capacity`|тот же массив, индекс **11**|`models[].capacity`|
+|`number` модели|тот же массив, индекс **14**|`models[].number`|
 |`at`|тело запроса, параметр `at`|приходит со страницы (`SNlM0e`), в файл не пишется|
 |индексы payload|тело `f.req`: это `[null,"<строка>"]`, внутри — массив из 81 элемента|сверить с §7.2 `docs/SPEC.md`|
+
+Индексы в этой таблице **с нуля**, как в коде (`GeminiProtocol.generateHeaders`)
+и в `GeminiProtocolTests`. Массив скопирован верно, если: индекс 0 = `1`,
+индекс 4 = id модели, индекс 11 = `capacity`, индекс 14 = `number`,
+индекс 16 = UUID сессии, всего 17 элементов.
 
 Из запросов `batchexecute`:
 

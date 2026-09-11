@@ -43,13 +43,18 @@
 |---|---|
 |Apple Mobile Device Support|установлен, служба `Apple Mobile Device Service` запущена|
 |iPhone|подключён и виден: `Apple iPhone`, `VID_05AC&PID_12A8`|
-|iloader|не установлен|
-|MSI iloader|`Error 1925 — insufficient privileges`: установка только с правами администратора, нужен клик в UAC|
-|iloader v2.3.3, `iloader-windows-x64.msi`|скачан, SHA-256 `9dbf05bd45a67c94ef80dcb487f20972b4f0dda25e0a49c2a177dbbe9d3933d8`|
+|iloader v2.3.3|**установлен** в `%LOCALAPPDATA%\iloader`, запущен|
+|`iloader-windows-x64.msi`|требует прав администратора: `Error 1925`. Не использовать|
+|`iloader-windows-x64.exe`|ставится **в профиль пользователя** без UAC: `iloader-setup.exe /S`. SHA-256 `049c68b17a81f2312516cea4c5852e9fc58fe2a9b295bb2308ff5894eaa9b96c`|
+|Телефон в iloader|виден: `DeviceList [DeviceID: 1]`, USB, `DeviceName: "iPhone"`, pairing-запись создана для UDID `…000E5DD21E32801C`, ошибок в логе нет|
 |`BookTrans.ipa`|лежит в `C:\Users\Gennadiy\Downloads\BookTrans\`|
 
 Это значит: **шаг «Install SideStore» в iloader делает пользователь** — вход в Apple ID
-и 2FA автоматизировать нельзя, и пароль не должен покидать вас.
+и 2FA автоматизировать нельзя, и пароль не должен покидать вас. Всё остальное уже
+подготовлено: iloader открыт, телефон подключён и виден.
+
+Если iloader нужно поставить заново — берите **`.exe`**, а не `.msi`: NSIS-сборка
+ставится в профиль пользователя и не требует администратора.
 
 ## Первая установка
 
