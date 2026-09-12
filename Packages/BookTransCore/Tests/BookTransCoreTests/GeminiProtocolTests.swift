@@ -103,7 +103,8 @@ final class GeminiProtocolTests: XCTestCase {
 
     func testGenerateHeadersCarryTheModelSelection() throws {
         let headers = GeminiRequestBuilder.generateHeaders(
-            config: GeminiConfig.lastResort, model: model, sessionUUID: sessionUUID)
+            config: GeminiConfig.lastResort, model: model,
+            clientSessionId: sessionUUID, requestUUID: sessionUUID)
         XCTAssertEqual(headers["Content-Type"], "application/x-www-form-urlencoded;charset=utf-8")
         XCTAssertEqual(headers["Origin"], "https://gemini.google.com")
         XCTAssertEqual(headers["Referer"], "https://gemini.google.com/")
@@ -195,7 +196,8 @@ final class GeminiProtocolTests: XCTestCase {
         XCTAssertNil(GeminiRequestBuilder.sessionHeader(config: disabled, sessionUUID: sessionUUID),
                      "the reference implementation sends no session header at all")
         let headers = GeminiRequestBuilder.generateHeaders(
-            config: disabled, model: model, sessionUUID: sessionUUID)
+            config: disabled, model: model,
+            clientSessionId: sessionUUID, requestUUID: sessionUUID)
         XCTAssertNil(headers[GeminiProtocol.sessionHeaderName])
         XCTAssertNotNil(headers[GeminiProtocol.modelHeaderName], "the model header stays")
     }
@@ -210,7 +212,8 @@ final class GeminiProtocolTests: XCTestCase {
 
     func testBatchExecModelHeaderHasNoModel() throws {
         let headers = GeminiRequestBuilder.batchExecHeaders(
-            config: GeminiConfig.lastResort, sessionUUID: sessionUUID)
+            config: GeminiConfig.lastResort,
+            clientSessionId: sessionUUID, requestUUID: sessionUUID)
         let modelHeader = try decode(try XCTUnwrap(headers[GeminiProtocol.modelHeaderName]))
         XCTAssertEqual(modelHeader.arrayValue?.count, 17)
         XCTAssertTrue(modelHeader[4]?.isNull == true, "status and usage RPCs carry no model id")
@@ -219,6 +222,31 @@ final class GeminiProtocolTests: XCTestCase {
     }
 
     // MARK: - Request bodies and URLs
+
+    func testClientSessionIdAndRequestUUIDAreSeparateFields() throws {
+        let clientSession = "11111111-1111-1111-1111-111111111111"
+        let requestUUID = "22222222-2222-2222-2222-222222222222"
+        let headers = GeminiRequestBuilder.generateHeaders(
+            config: GeminiConfig.lastResort, model: model,
+            clientSessionId: clientSession, requestUUID: requestUUID)
+
+        // The model header carries the client session id...
+        let modelHeader = try decode(try XCTUnwrap(headers[GeminiProtocol.modelHeaderName]))
+        XCTAssertEqual(modelHeader[16]?.stringValue, clientSession)
+        // ...while the session header carries the per-request one.
+        let sessionHeader = try decode(try XCTUnwrap(headers[GeminiProtocol.sessionHeaderName]))
+        XCTAssertEqual(sessionHeader[0]?.stringValue, requestUUID)
+    }
+
+    func testFreshRequestUUIDsDiffer() {
+        let first = GeminiRequestBuilder.newRequestUUID()
+        let second = GeminiRequestBuilder.newRequestUUID()
+        XCTAssertNotEqual(first, second, "each request gets its own UUID")
+        XCTAssertEqual(first, first.uppercased(), "the wire format is uppercase")
+        XCTAssertEqual(first.count, 36)
+    }
+
+    // MARK: - Account status and usage
 
     func testGenerateBody() {
         let body = GeminiRequestBuilder.generateBody(at: "AT+TOKEN", fReq: "[null,\"x y\"]")
@@ -338,7 +366,7 @@ final class GeminiProtocolTests: XCTestCase {
 
     func testModelLookupFallsBackToTheDefault() {
         let config = GeminiConfig.lastResort
-        XCTAssertEqual(config.model(id: "e6fa609c3fa255c0")?.label, "Pro (подписка)")
+        XCTAssertEqual(config.model(id: "e6fa609c3fa255c0")?.label, "Gemini 3.1 Pro")
         XCTAssertEqual(config.model(id: "unknown-id")?.id, config.defaultModel)
         XCTAssertEqual(config.model(id: nil)?.id, config.defaultModel)
     }
@@ -606,17 +634,58 @@ final class GeminiResponseTests: XCTestCase {
         XCTAssertEqual(result.text, "ok")
     }
 
-    // MARK: - Account status and usage
+    /// Google stopped serving `SNlM0e` in the app HTML in early 2026. An app that
+    /// requires it declares a signed-in user signed out — which is exactly the
+    /// failure this pins against.
+    func testSessionWithoutAccessTokenIsStillUsable() {
+        let withoutToken = WizParameters(at: "", bl: "boq_build", sessionId: "1234567890")
+        XCTAssertTrue(withoutToken.hasSessionParameters)
+        XCTAssertFalse(withoutToken.hasAccessToken)
+
+        let withToken = WizParameters(at: "TOKEN", bl: "boq_build", sessionId: "1234567890")
+        XCTAssertTrue(withToken.hasSessionParameters)
+        XCTAssertTrue(withToken.hasAccessToken)
+
+        // Nothing but the token is not a session either.
+        let tokenOnly = WizParameters(at: "TOKEN", bl: "", sessionId: "")
+        XCTAssertFalse(tokenOnly.hasSessionParameters)
+    }
+
+    func testAccountStatusCodesCoverTheKnownSet() {
+        func status(_ code: Int) -> GeminiAccountStatus {
+            let json = "[0,0,0,0,0,0,0,0,0,0,0,0,0,0,\(code)]"
+            return GeminiResponseParser.parseAccountStatus(
+                try! JSONValue.decode(from: Data(json.utf8)))
+        }
+        XCTAssertTrue(status(1000).isUsable)
+        XCTAssertEqual(status(1014).code?.rawValue, 1014)
+        XCTAssertEqual(status(1016).error?.kind, .unauthenticated)
+        XCTAssertEqual(status(1021).code, .accountRejected)
+        XCTAssertEqual(status(1033).code, .accountUntrusted)
+        XCTAssertEqual(status(1040).code, .tosPending)
+        XCTAssertEqual(status(1042).code, .tosOutOfDate)
+        XCTAssertEqual(status(1054).code, .rejectedByGuardian)
+        XCTAssertEqual(status(1057).code, .guardianApprovalRequired)
+        XCTAssertEqual(status(1060).error?.kind, .ipRegion)
+        XCTAssertFalse(status(1060).isUsable)
+        // Unknown codes must degrade to "rejected", never to "fine".
+        XCTAssertFalse(status(9999).isUsable)
+        XCTAssertTrue(status(9999).error?.message.contains("9999") ?? false)
+        // Every message has to tell the user something actionable.
+        for code in [1014, 1016, 1021, 1033, 1040, 1042, 1054, 1057, 1060] {
+            XCTAssertFalse(status(code).code?.message.isEmpty ?? true, "\(code)")
+        }
+    }
 
     func testAccountStatusCodes() {
         let ok = GeminiResponseParser.parseAccountStatus(try! JSONValue.decode(from: Data("[0,0,0,0,0,0,0,0,0,0,0,0,0,0,1000]".utf8)))
         XCTAssertEqual(ok.statusCode, 1000)
         XCTAssertNil(ok.error)
-        XCTAssertTrue(ok.isSignedIn)
+        XCTAssertTrue(ok.isUsable)
 
         let signedOut = GeminiResponseParser.parseAccountStatus(try! JSONValue.decode(from: Data("[0,0,0,0,0,0,0,0,0,0,0,0,0,0,1016]".utf8)))
         XCTAssertEqual(signedOut.error?.kind, .unauthenticated)
-        XCTAssertFalse(signedOut.isSignedIn)
+        XCTAssertFalse(signedOut.isUsable)
 
         let blocked = GeminiResponseParser.parseAccountStatus(try! JSONValue.decode(from: Data("[0,0,0,0,0,0,0,0,0,0,0,0,0,0,1060]".utf8)))
         XCTAssertEqual(blocked.error?.kind, .ipRegion)

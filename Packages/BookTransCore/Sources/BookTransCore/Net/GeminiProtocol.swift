@@ -166,10 +166,10 @@ public extension GeminiConfig {
         rotateCookiesURL: "https://accounts.google.com/RotateCookies",
         rpcStatus: "otAQ7b", rpcUsage: "jSf9Qc", rpcQuota: "qpEbW",
         models: [
-            GeminiModel(id: "56fdd199312815e2", label: "Flash (подписка)", capacity: 4, number: 1),
-            GeminiModel(id: "e6fa609c3fa255c0", label: "Pro (подписка)", capacity: 4, number: 3),
-            GeminiModel(id: "8c46e95b1a07cecc", label: "Flash Lite (подписка)", capacity: 4, number: 6),
-            GeminiModel(id: "fbb127bbb056c959", label: "Flash (free)", capacity: 1, number: 1),
+            GeminiModel(id: "56fdd199312815e2", label: "Gemini 3.8 Flash", capacity: 4, number: 1),
+            GeminiModel(id: "e6fa609c3fa255c0", label: "Gemini 3.1 Pro", capacity: 4, number: 3),
+            GeminiModel(id: "8c46e95b1a07cecc", label: "Gemini 3.5 Flash-Lite", capacity: 4, number: 6),
+            GeminiModel(id: "fbb127bbb056c959", label: "Gemini Flash (без подписки)", capacity: 1, number: 1),
         ],
         defaultModel: "56fdd199312815e2")
 }
@@ -239,7 +239,20 @@ public struct WizParameters: Codable, Sendable, Equatable {
         self.source = source
     }
 
-    public var isSignedIn: Bool { !at.isEmpty }
+    /// Whether the page handed over the parameters a request needs.
+    ///
+    /// Deliberately does **not** require `at`: Google stopped serving `SNlM0e` in
+    /// the `/app` HTML around February 2026, and every maintained client now sends
+    /// an empty `at` and carries on (HanaokaYuzu/Gemini-API v1.20.0 "allow init
+    /// without SNlM0e token", v2.0.0, and gpt4free both do this).
+    ///
+    /// Nor is this the same as being signed in: the *sign-in page* carries its own
+    /// `SNlM0e`/`FdrFJe`, so these values being present proves nothing about the
+    /// account. Sign-in is decided from the cookie store and the account RPC.
+    public var hasSessionParameters: Bool { !bl.isEmpty && !sessionId.isEmpty }
+
+    /// True when the anti-CSRF token was present. Diagnostics only.
+    public var hasAccessToken: Bool { !at.isEmpty }
 
     public var maskedDescription: String {
         "at=\(WizParameters.mask(at)) bl=\(bl) f.sid=\(sessionId) hl=\(language) "
@@ -422,19 +435,21 @@ public enum GeminiRequestBuilder {
     }
 
     public static func generateHeaders(
-        config: GeminiConfig, model: GeminiModel, sessionUUID: String
+        config: GeminiConfig, model: GeminiModel, clientSessionId: String, requestUUID: String
     ) -> [String: String] {
         var headers: [String: String] = [
             "Content-Type": GeminiProtocol.formContentType,
             "Origin": GeminiProtocol.origin,
             "Referer": GeminiProtocol.referer,
             "X-Same-Domain": GeminiProtocol.sameDomain,
+            // The model header carries the client session id...
             GeminiProtocol.modelHeaderName: modelHeader(
-                config: config, model: model, sessionUUID: sessionUUID),
+                config: config, model: model, sessionUUID: clientSessionId),
             GeminiProtocol.extraHeaderName89: "[0]",
             GeminiProtocol.extraHeaderName90: "[0,0,0]",
         ]
-        if let session = sessionHeader(config: config, sessionUUID: sessionUUID) {
+        // ...while this header carries the per-request one.
+        if let session = sessionHeader(config: config, sessionUUID: requestUUID) {
             headers[GeminiProtocol.sessionHeaderName] = session
         }
         return headers
@@ -476,17 +491,19 @@ public enum GeminiRequestBuilder {
         return components.url!.absoluteString
     }
 
-    public static func batchExecHeaders(config: GeminiConfig, sessionUUID: String) -> [String: String] {
+    public static func batchExecHeaders(
+        config: GeminiConfig, clientSessionId: String, requestUUID: String
+    ) -> [String: String] {
         var headers: [String: String] = [
             "Content-Type": GeminiProtocol.formContentType,
             "Origin": GeminiProtocol.origin,
             "Referer": GeminiProtocol.referer,
             "X-Same-Domain": GeminiProtocol.sameDomain,
-            GeminiProtocol.modelHeaderName: batchModelHeader(config: config, sessionUUID: sessionUUID),
+            GeminiProtocol.modelHeaderName: batchModelHeader(config: config, sessionUUID: clientSessionId),
             GeminiProtocol.extraHeaderName89: "[0]",
             GeminiProtocol.extraHeaderName90: "[0,0,0]",
         ]
-        if let session = sessionHeader(config: config, sessionUUID: sessionUUID) {
+        if let session = sessionHeader(config: config, sessionUUID: requestUUID) {
             headers[GeminiProtocol.sessionHeaderName] = session
         }
         return headers
@@ -526,6 +543,14 @@ public enum GeminiRequestBuilder {
 
     /// Session id used in the model and session headers and in payload index 59.
     public static func newSessionUUID() -> String {
+        UUID().uuidString.uppercased()
+    }
+
+    /// Payload slot 59 and `x-goog-ext-525005358-jspb` carry a fresh UUID per
+    /// request, while the model header's last slot carries the *client session* id
+    /// that is regenerated once per init. Sending one value for all three works
+    /// today but is not what the web client does.
+    public static func newRequestUUID() -> String {
         UUID().uuidString.uppercased()
     }
 

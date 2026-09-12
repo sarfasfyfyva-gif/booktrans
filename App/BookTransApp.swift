@@ -34,7 +34,8 @@ struct RootView: View {
             NavigationStack {
                 LibraryView()
             }
-            TransportHostView(webView: app.gemini.transport.webView)
+            TransportHostView(webView: app.gemini.transport.webView,
+                              claimsOwnership: !app.isLoginPresented)
                 .frame(width: 1, height: 1)
                 .opacity(0.01)
                 .allowsHitTesting(false)

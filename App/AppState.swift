@@ -32,6 +32,10 @@ final class AppState {
     /// True while an import is running, so the UI can disable the picker.
     private(set) var isImporting = false
 
+    /// True while the login sheet is presenting the transport's WebView, so the
+    /// hidden 1x1 host leaves it alone.
+    var isLoginPresented = false
+
     struct Banner: Identifiable, Equatable {
         enum Kind { case info, error }
         let id = UUID()

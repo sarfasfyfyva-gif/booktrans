@@ -287,22 +287,73 @@ public extension GeminiResponseParser {
 // MARK: - Account status (otAQ7b)
 
 public struct GeminiAccountStatus: Sendable {
-    /// `body[14]`: 1000 ok, 1016 not signed in, 1060 region blocked.
+    /// `body[14]`. The full set of values, as the reference implementation
+    /// enumerates them; anything unrecognised collapses to "rejected".
+    public enum Code: Int, Sendable {
+        case available = 1000
+        case accessTemporarilyUnavailable = 1014
+        case unauthenticated = 1016
+        case accountRejected = 1021
+        case accountUntrusted = 1033
+        case tosPending = 1040
+        case tosOutOfDate = 1042
+        case rejectedByGuardian = 1054
+        case guardianApprovalRequired = 1057
+        case locationRejected = 1060
+
+        /// Message shown to the user; each one says what to do about it.
+        public var message: String {
+            switch self {
+            case .available:
+                return "Аккаунт в порядке."
+            case .accessTemporarilyUnavailable:
+                return "Доступ временно ограничен (1014) — возможно, из-за региона или сессии. Попробуем позже."
+            case .unauthenticated:
+                return "Сессия не авторизована: войдите в Gemini заново."
+            case .accountRejected:
+                return "Google отклонил доступ к аккаунту (1021). Проверьте настройки аккаунта."
+            case .accountUntrusted:
+                return "Аккаунт не прошёл проверку безопасности (1033)."
+            case .tosPending:
+                return "Нужно принять условия использования Gemini (1040) — откройте gemini.google.com."
+            case .tosOutOfDate:
+                return "Условия использования устарели (1042) — примите новые на gemini.google.com."
+            case .rejectedByGuardian:
+                return "Доступ закрыт родительским контролем (1054)."
+            case .guardianApprovalRequired:
+                return "Нужно подтверждение родителя (1057)."
+            case .locationRejected:
+                return "Gemini недоступен в вашем регионе (1060) — включите VPN."
+            }
+        }
+    }
+
     public var statusCode: Int?
     public var models: [GeminiModel]
     public var tierRaw: Int?
     /// Kept verbatim so the debug screen can show what the backend really sent.
     public var raw: JSONValue
 
-    public var isSignedIn: Bool { statusCode.map { $0 != 1016 } ?? true }
+    /// An absent code means the backend said nothing, which the reference
+    /// implementation reads as "available".
+    public var code: Code? { statusCode.flatMap(Code.init(rawValue:)) }
+
+    /// The account is usable when the backend did not object. Note this is the
+    /// authoritative answer about the session — unlike the presence of `SNlM0e`,
+    /// which Google stopped serving in 2026 and which the sign-in page carries too.
+    public var isUsable: Bool {
+        guard let statusCode else { return true }
+        return statusCode == Code.available.rawValue
+    }
 
     public var error: GeminiError? {
         switch statusCode {
-        case 1000: return nil
-        case 1016: return .unauthenticated
-        case 1060: return GeminiError.forCode(1060)
-        case .some(let code): return GeminiError.forCode(code)
-        case nil: return nil
+        case nil, Code.available.rawValue: return nil
+        case Code.unauthenticated.rawValue: return .unauthenticated
+        case .some(let raw):
+            return GeminiError(kind: raw == Code.locationRejected.rawValue ? .ipRegion : .unknown,
+                               code: raw,
+                               message: code?.message ?? "Google отклонил доступ к аккаунту (\(raw)).")
         }
     }
 }

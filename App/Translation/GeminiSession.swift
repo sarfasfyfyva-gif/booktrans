@@ -44,14 +44,27 @@ final class GeminiSession {
     /// were not.
     private(set) var wizSource = "—"
 
+    /// Host of the page the parameters came from.
+    private(set) var pageHost = ""
+
+    /// True when the page actually carried `SNlM0e`. Since 2026 it usually does
+    /// not, and that is not a problem: requests go out with an empty `at`, which
+    /// is what every maintained client does.
+    private(set) var accessTokenPresent = false
+
     var hasAuthCookies: Bool { !authCookieNames.isEmpty }
 
     /// A one-line answer to "why can't the app sign in", for the diagnostics screen.
     var sessionDiagnosis: String {
-        if signInState == .signedIn { return "сессия активна" }
+        if signInState == .signedIn {
+            return "сессия активна" + (accessTokenPresent ? "" : " (без SNlM0e — это норма с 2026)")
+        }
         if !hasAuthCookies {
-            return "в хранилище приложения нет cookies Google — вход не доведён до конца "
-                + "или выполнен в другом браузере"
+            return "в хранилище приложения нет cookies Google — вход не доведён до конца"
+        }
+        if !pageHost.hasSuffix("gemini.google.com") {
+            return "страница открыта на \(pageHost.isEmpty ? "неизвестном хосте" : pageHost), "
+                + "а не на gemini.google.com — нужен вход"
         }
         return "cookies Google есть, но параметры сессии не найдены на странице "
             + "(источник: \(wizSource))"
@@ -77,6 +90,11 @@ final class GeminiSession {
         var elapsedSeconds: Double
         var at: Date
     }
+
+    /// The model header's last slot carries a client session id that is
+    /// regenerated once per app session, while the payload and the session header
+    /// carry a fresh UUID per request.
+    private let clientSessionId = GeminiRequestBuilder.newSessionUUID()
 
     private var reqid = ReqidGenerator()
     private var lastWizRefresh: Date?
@@ -175,20 +193,42 @@ final class GeminiSession {
             let parameters = try await transport.readWizParameters(config: config)
             wiz = parameters
             lastWizRefresh = Date()
-            signInState = parameters.isSignedIn ? .signedIn : .signedOut
+            wizSource = parameters.source
+            pageHost = transport.currentURL.flatMap { URL(string: $0)?.host } ?? ""
+            accessTokenPresent = parameters.hasAccessToken
 
-            // Record what the app's own cookie store holds. Logged by name only:
-            // values never leave WebKit.
+            // What the app's own cookie store holds. Logged by name only: values
+            // never leave WebKit.
             let names = Set((await transport.cookies()).map(\.name))
             authCookieNames = GeminiSession.authCookieCandidates.filter { names.contains($0) }
-            wizSource = parameters.source
-            LogStore.shared.append(level: .info, event: "session.cookies", fields: [
-                "present": authCookieNames.joined(separator: ","),
-                "count": String(authCookieNames.count),
+
+            // Sign-in is decided by what Google did not change: the session
+            // cookies in this WebView's store, the host the page actually came
+            // from, and (checked separately) the account RPC. `SNlM0e` is
+            // deliberately not consulted — Google stopped serving it in the /app
+            // HTML in early 2026, and the *sign-in page* carries one of its own, so
+            // its presence proves nothing in either direction.
+            let onAppHost = pageHost.hasSuffix("gemini.google.com")
+            if !parameters.hasSessionParameters {
+                signInState = .signedOut
+            } else if !onAppHost {
+                signInState = .signedOut
+                CoreLog.warn("session parameters came from \(pageHost), not the Gemini app")
+            } else if authCookieNames.isEmpty {
+                signInState = .signedOut
+            } else {
+                signInState = .signedIn
+            }
+            LogStore.shared.append(level: .info, event: "session.evaluated", fields: [
+                "signedIn": signInState == .signedIn ? "1" : "0",
+                "host": pageHost,
+                "source": parameters.source,
+                "hasAt": parameters.hasAccessToken ? "1" : "0",
+                "cookies": authCookieNames.joined(separator: ","),
             ])
 
             lastError = signInState == .signedOut ? sessionDiagnosis : nil
-            return parameters.isSignedIn
+            return signInState == .signedIn
         } catch {
             signInState = .unknown
             lastError = error.localizedDescription
@@ -229,17 +269,17 @@ final class GeminiSession {
     private func batchExec(
         rpcId: String, payload: String, sourcePath: GeminiRequestBuilder.SourcePath
     ) async throws -> JSONValue {
-        guard let wiz, wiz.isSignedIn else {
+        guard let wiz, wiz.hasSessionParameters else {
             throw GeminiSessionError.notSignedIn
         }
-        let sessionUUID = GeminiRequestBuilder.newSessionUUID()
         let request = TransportRequest(
             url: GeminiRequestBuilder.batchExecURL(
                 config: config, rpcId: rpcId, sourcePath: sourcePath,
                 bl: wiz.bl, sessionId: wiz.sessionId, reqid: reqid.next()),
             method: "POST",
             headers: GeminiRequestBuilder.batchExecHeaders(
-                config: config, sessionUUID: sessionUUID),
+                config: config, clientSessionId: clientSessionId,
+                requestUUID: GeminiRequestBuilder.newRequestUUID()),
             body: GeminiRequestBuilder.batchExecBody(
                 at: wiz.at,
                 fReq: GeminiRequestBuilder.batchExecFReq(rpcId: rpcId, payload: payload)),
@@ -333,7 +373,7 @@ final class GeminiSession {
     /// Sends one prompt as a fresh single-turn conversation and returns the text.
     func generate(prompt: String) async throws -> String {
         let started = Date()
-        if wiz == nil || !(wiz?.isSignedIn ?? false) {
+        if wiz == nil || !(wiz?.hasSessionParameters ?? false) {
             let ok = await refreshSession()
             if !ok { throw GeminiSessionError.notSignedIn }
         }
@@ -342,18 +382,19 @@ final class GeminiSession {
         }
         await maintainCookies()
 
-        guard let wiz, wiz.isSignedIn else { throw GeminiSessionError.notSignedIn }
+        guard let wiz, wiz.hasSessionParameters else { throw GeminiSessionError.notSignedIn }
         guard let model = selectedModel else { throw GeminiSessionError.noModel }
 
-        let sessionUUID = GeminiRequestBuilder.newSessionUUID()
+        let requestUUID = GeminiRequestBuilder.newRequestUUID()
         let requestURL = GeminiRequestBuilder.generateURL(
             config: config, bl: wiz.bl, sessionId: wiz.sessionId, reqid: reqid.next())
         let headers = GeminiRequestBuilder.generateHeaders(
-            config: config, model: model, sessionUUID: sessionUUID)
+            config: config, model: model, clientSessionId: clientSessionId,
+            requestUUID: requestUUID)
         let body = GeminiRequestBuilder.generateBody(
             at: wiz.at,
             fReq: GeminiRequestBuilder.generateFReq(
-                prompt: prompt, model: model, sessionUUID: sessionUUID))
+                prompt: prompt, model: model, sessionUUID: requestUUID))
 
         let response: TransportResponse
         do {

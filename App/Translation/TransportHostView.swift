@@ -6,47 +6,62 @@ import BookTransCore
 ///
 /// A detached `WKWebView` has its JavaScript timers throttled, which would stall
 /// the `fetch` abort timer and any page work, so the transport's WebView lives
-/// here for the whole session. It is deliberately not interactive: the login
-/// screen has its own WebView, because a view can only have one superview and
-/// moving this one into a sheet would leave it unmounted afterwards.
+/// here for the whole session.
+///
+/// It is hosted inside a container so that the same WebView can be presented full
+/// size for the Google sign-in and then come back here: `updateUIView` re-claims
+/// it whenever the sheet has taken it. Signing in and then reading the session
+/// from *one* WebView is the whole point — the session lives in that page, and
+/// having two WebViews share a cookie store is a question that then never arises.
 struct TransportHostView: UIViewRepresentable {
     let webView: WKWebView
+    var interactive: Bool = false
+    /// False while the login sheet is presenting this WebView: the 1x1 host must
+    /// not pull it back on some unrelated re-render, or the page the user is
+    /// signing in on would vanish mid-flow.
+    var claimsOwnership: Bool = true
 
-    func makeUIView(context: Context) -> WKWebView {
-        webView.isUserInteractionEnabled = false
-        return webView
+    func makeUIView(context: Context) -> UIView {
+        let host = UIView(frame: .zero)
+        host.backgroundColor = .clear
+        host.addSubview(webView)
+        Self.pin(webView, to: host)
+        webView.isUserInteractionEnabled = interactive
+        return host
     }
 
-    func updateUIView(_ uiView: WKWebView, context: Context) {
-        uiView.isUserInteractionEnabled = false
+    func updateUIView(_ host: UIView, context: Context) {
+        webView.isUserInteractionEnabled = interactive
+        guard claimsOwnership, webView.superview !== host else { return }
+        webView.removeFromSuperview()
+        host.addSubview(webView)
+        Self.pin(webView, to: host)
+    }
+
+    private static func pin(_ child: UIView, to parent: UIView) {
+        child.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            child.leadingAnchor.constraint(equalTo: parent.leadingAnchor),
+            child.trailingAnchor.constraint(equalTo: parent.trailingAnchor),
+            child.topAnchor.constraint(equalTo: parent.topAnchor),
+            child.bottomAnchor.constraint(equalTo: parent.bottomAnchor),
+        ])
     }
 }
 
 /// Sheet used to sign in to Google.
 ///
-/// It runs its own WebView over the same `WKWebsiteDataStore.default()`, so the
-/// cookies it collects are exactly the ones the transport's requests read. Two
-/// WebViews sharing a data store share the session; nothing else is shared.
+/// It presents the transport's own WebView, so the page the user signs in on is
+/// the page the app later reads its session parameters from and issues its requests
+/// through. Nothing has to be shared or copied between browsing contexts.
 struct GeminiLoginSheet: View {
     @Environment(AppState.self) private var app
     @Environment(\.dismiss) private var dismiss
-    @State private var webView = GeminiLoginSheet.makeWebView()
     @State private var isWorking = false
-
-    static func makeWebView() -> WKWebView {
-        let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .default()
-        configuration.defaultWebpagePreferences.allowsContentJavaScript = true
-        let webView = WKWebView(frame: .zero, configuration: configuration)
-        // The login itself happens here, so this is the WebView that must not
-        // look embedded to Google.
-        webView.customUserAgent = SafariUserAgent.mobileSafari()
-        return webView
-    }
 
     var body: some View {
         NavigationStack {
-            LoginWebView(webView: webView, startURL: app.gemini.config.appURL)
+            TransportHostView(webView: app.gemini.transport.webView, interactive: true)
                 .background(Theme.background)
                 .navigationTitle("Вход в Gemini")
                 .navigationBarTitleDisplayMode(.inline)
@@ -68,8 +83,7 @@ struct GeminiLoginSheet: View {
                                     }
                                     dismiss()
                                 } else {
-                                    app.show("Вход не подтверждён — войдите в аккаунт Google",
-                                             kind: .error)
+                                    app.show(app.gemini.sessionDiagnosis, kind: .error)
                                 }
                             }
                         } label: {
@@ -82,21 +96,18 @@ struct GeminiLoginSheet: View {
                         .disabled(isWorking)
                     }
                 }
+                .onAppear {
+                    app.isLoginPresented = true
+                    // Only load the page if the transport is not already sitting on
+                    // it: reloading would throw away the page the user just signed
+                    // in on.
+                    Task {
+                        if !(app.gemini.transport.currentURL?.contains("gemini.google.com") ?? false) {
+                            try? await app.gemini.transport.load(app.gemini.config.appURL)
+                        }
+                    }
+                }
+                .onDisappear { app.isLoginPresented = false }
         }
     }
-}
-
-/// Interactive WebView that loads the Gemini app once.
-private struct LoginWebView: UIViewRepresentable {
-    let webView: WKWebView
-    let startURL: String
-
-    func makeUIView(context: Context) -> WKWebView {
-        if webView.url == nil, let url = URL(string: startURL) {
-            webView.load(URLRequest(url: url))
-        }
-        return webView
-    }
-
-    func updateUIView(_ uiView: WKWebView, context: Context) {}
 }

@@ -15,10 +15,10 @@
     "lang": "TuX5cc"
   },
   "models": [
-    { "id": "56fdd199312815e2", "label": "Flash (подписка)", "capacity": 4, "number": 1 },
-    { "id": "e6fa609c3fa255c0", "label": "Pro (подписка)", "capacity": 4, "number": 3 },
-    { "id": "8c46e95b1a07cecc", "label": "Flash Lite (подписка)", "capacity": 4, "number": 6 },
-    { "id": "fbb127bbb056c959", "label": "Flash (free)", "capacity": 1, "number": 1 }
+    { "id": "56fdd199312815e2", "label": "Gemini 3.8 Flash", "capacity": 4, "number": 1 },
+    { "id": "e6fa609c3fa255c0", "label": "Gemini 3.1 Pro", "capacity": 4, "number": 3 },
+    { "id": "8c46e95b1a07cecc", "label": "Gemini 3.5 Flash-Lite", "capacity": 4, "number": 6 },
+    { "id": "fbb127bbb056c959", "label": "Gemini Flash (без подписки)", "capacity": 1, "number": 1 }
   ],
   "defaultModel": "56fdd199312815e2",
   "prompts": { "version": 1 }
