@@ -193,11 +193,16 @@ final class GeminiWebTransport {
             sessionId: string("sid"),
             language: string("hl").isEmpty ? "ru" : string("hl"),
             source: string("source").isEmpty ? "none" : string("source"))
-        if params.isSignedIn {
+        if params.hasAccessToken {
             LogStore.shared.registerSecret(params.at)
         }
-        LogStore.shared.append(level: params.isSignedIn ? .info : .warn, event: "wiz.read", fields: [
-            "signedIn": params.isSignedIn ? "1" : "0",
+        // This reports what the *page* gave up, not whether the user is signed in:
+        // that needs the cookie store, and `at` is optional since 2026, so its
+        // absence is logged but is not a failure.
+        LogStore.shared.append(level: params.hasSessionParameters ? .info : .warn,
+                               event: "wiz.read", fields: [
+            "session": params.hasSessionParameters ? "1" : "0",
+            "hasAt": params.hasAccessToken ? "1" : "0",
             "source": string("source"),
             "bl": params.bl,
             "sid": params.sessionId,
@@ -207,8 +212,8 @@ final class GeminiWebTransport {
             "mentionsAt": (object["mentionsAt"] as? Bool) == true ? "1" : "0",
             "mentionsBuild": (object["mentionsBuild"] as? Bool) == true ? "1" : "0",
         ])
-        if !params.isSignedIn {
-            CoreLog.warn("WIZ parameters not found on \(string("href")) (\(string("source")))")
+        if !params.hasSessionParameters {
+            CoreLog.warn("session parameters not found on \(string("href")) (\(string("source")))")
         }
         return params
     }
