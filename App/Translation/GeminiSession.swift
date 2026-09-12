@@ -202,25 +202,22 @@ final class GeminiSession {
             let names = Set((await transport.cookies()).map(\.name))
             authCookieNames = GeminiSession.authCookieCandidates.filter { names.contains($0) }
 
-            // Sign-in is decided by what Google did not change: the session
-            // cookies in this WebView's store, the host the page actually came
-            // from, and (checked separately) the account RPC. `SNlM0e` is
-            // deliberately not consulted — Google stopped serving it in the /app
-            // HTML in early 2026, and the *sign-in page* carries one of its own, so
-            // its presence proves nothing in either direction.
-            let onAppHost = pageHost.hasSuffix("gemini.google.com")
-            if !parameters.hasSessionParameters {
-                signInState = .signedOut
-            } else if !onAppHost {
-                signInState = .signedOut
-                CoreLog.warn("session parameters came from \(pageHost), not the Gemini app")
-            } else if authCookieNames.isEmpty {
-                signInState = .signedOut
-            } else {
+            // The decision itself lives in Core so its table is under test; see
+            // SessionEvaluator for why the anti-CSRF token is not consulted.
+            let verdict = SessionEvaluator.evaluate(
+                parameters: parameters, host: pageHost, cookieNames: names)
+            switch verdict {
+            case .signedIn:
                 signInState = .signedIn
+            case .missingParameters, .wrongHost, .missingCookies:
+                signInState = .signedOut
+                if case .wrongHost(let host) = verdict {
+                    CoreLog.warn("session parameters came from \(host), not the Gemini app")
+                }
             }
             LogStore.shared.append(level: .info, event: "session.evaluated", fields: [
                 "signedIn": signInState == .signedIn ? "1" : "0",
+                "verdict": "\(verdict)",
                 "host": pageHost,
                 "source": parameters.source,
                 "hasAt": parameters.hasAccessToken ? "1" : "0",
