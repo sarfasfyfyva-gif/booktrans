@@ -90,6 +90,35 @@ final class AppState {
         queue.resumeFromStoredState()
     }
 
+    /// Imports book files that were dropped into the app's own folder, by the
+    /// Files app, Finder, iTunes File Sharing, or "Open in BookTrans".
+    ///
+    /// Runs at launch and whenever the app becomes active, which is the moment a
+    /// file copied over from a computer appears. Each file is moved into
+    /// `Documents/Imported` once handled, so it is never imported twice — and a
+    /// file that fails to import is retired too, with the reason shown once rather
+    /// than on every activation.
+    @discardableResult
+    func importDroppedBooks() async -> Int {
+        guard !isImporting else { return 0 }
+        let incoming = DroppedBookScanner.candidates(docsRoot: paths.docsRoot)
+        guard !incoming.isEmpty else { return 0 }
+
+        var imported = 0
+        for file in incoming {
+            let bookId = await importBook(from: file)
+            if bookId != nil { imported += 1 }
+            // Retire either way: a file that cannot be read would otherwise be
+            // retried and reported on every foreground.
+            DroppedBookScanner.retire(file, docsRoot: paths.docsRoot)
+        }
+        LogStore.shared.append(level: .info, event: "import.dropped", fields: [
+            "found": String(incoming.count),
+            "imported": String(imported),
+        ])
+        return imported
+    }
+
     /// Creates the fixed sandbox directories. Safe to run on every launch.
     private func bootstrap() {
         do {

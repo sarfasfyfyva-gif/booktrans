@@ -15,6 +15,10 @@ struct BookTransApp: App {
         }
         .onChange(of: scenePhase) { _, phase in
             app.handleScenePhase(phase)
+            // A file copied over from a computer lands while the app is in the
+            // background, so becoming active is when it gets picked up.
+            guard phase == .active else { return }
+            Task { await app.importDroppedBooks() }
         }
     }
 }
@@ -49,6 +53,7 @@ struct RootView: View {
         .task {
             // state.json remembers whether a translation was mid-flight.
             app.resumeQueueIfNeeded()
+            await app.importDroppedBooks()
         }
     }
 }

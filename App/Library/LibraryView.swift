@@ -93,7 +93,7 @@ private struct EmptyLibraryView: View {
             Text("Библиотека пуста")
                 .font(.headline)
                 .foregroundStyle(Theme.primaryText)
-            Text("Добавьте книгу в формате FB2 или EPUB.\nФайл можно открыть через «Поделиться»,\nскопировать в папку BookTrans в «Файлах»\nили выбрать кнопкой ниже.")
+            Text("Добавьте книгу в формате FB2 или EPUB.\nФайл можно выбрать кнопкой ниже,\nоткрыть через «Поделиться» или просто\nскопировать в папку BookTrans в «Файлах» —\nон подхватится сам.")
                 .font(.footnote)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(Theme.secondaryText)
