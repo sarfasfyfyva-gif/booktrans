@@ -35,6 +35,7 @@ final class GeminiWebTransport {
     /// Kept alive for the whole session; also presented full size during login.
     let webView: WKWebView
     private let delegate: NavigationDelegate
+    private let uiDelegate: InteractionDelegate
 
     init(websiteDataStore: WKWebsiteDataStore = .default()) {
         let configuration = WKWebViewConfiguration()
@@ -50,7 +51,14 @@ final class GeminiWebTransport {
         webView.allowsBackForwardNavigationGestures = false
         self.webView = webView
         self.delegate = NavigationDelegate()
+        self.uiDelegate = InteractionDelegate()
         webView.navigationDelegate = delegate
+        // Without a UI delegate WebKit drops `window.open` and `target="_blank"`
+        // links on the floor — no window, no error, nothing. Google's sign-in flow
+        // uses exactly those, so tapping "Sign in" looked like a dead button in an
+        // otherwise live page. Loading such links in the same WebView keeps the
+        // whole sign-in in the browsing context the app later reads its session from.
+        webView.uiDelegate = uiDelegate
     }
 
     // MARK: - Navigation
@@ -369,6 +377,44 @@ enum TransportError: LocalizedError {
 
 /// Bridges `WKNavigationDelegate` callbacks into async continuations.
 @MainActor
+/// Keeps the user's page usable during sign-in.
+///
+/// The delegate's job is the popup case: WebKit refuses to open a new window unless
+/// something handles the request, and refusing silently is what made the sign-in
+/// button appear dead. Anything the page tries to open in a new window is loaded in
+/// this one instead, which also keeps the resulting cookies in the store the app
+/// reads from.
+@MainActor
+private final class InteractionDelegate: NSObject, WKUIDelegate {
+    func webView(_ webView: WKWebView,
+                 createWebViewWith configuration: WKWebViewConfiguration,
+                 for navigationAction: WKNavigationAction,
+                 windowFeatures: WKWindowFeatures) -> WKWebView? {
+        if navigationAction.targetFrame == nil, let url = navigationAction.request.url {
+            LogStore.shared.append(level: .info, event: "popup.loaded-in-place",
+                                   fields: ["host": url.host ?? ""])
+            webView.load(navigationAction.request)
+        }
+        return nil
+    }
+
+    /// Google's consent and account pages ask for the camera-free defaults; without
+    /// an answer the sheet stays empty.
+    func webView(_ webView: WKWebView,
+                 runJavaScriptConfirmPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo,
+                 completionHandler: @escaping (Bool) -> Void) {
+        completionHandler(true)
+    }
+
+    func webView(_ webView: WKWebView,
+                 runJavaScriptAlertPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo,
+                 completionHandler: @escaping () -> Void) {
+        completionHandler()
+    }
+}
+
 private final class NavigationDelegate: NSObject, WKNavigationDelegate {
     private var continuation: CheckedContinuation<Void, Error>?
 

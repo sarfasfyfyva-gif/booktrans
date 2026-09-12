@@ -3,7 +3,6 @@ import BookTransCore
 
 struct SettingsView: View {
     @Environment(AppState.self) private var app
-    @State private var showingLogin = false
     @State private var isRefreshing = false
 
     var body: some View {
@@ -25,7 +24,8 @@ struct SettingsView: View {
         .background(Theme.background)
         .navigationTitle("Настройки")
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: $showingLogin) { GeminiLoginSheet() }
+        .sheet(isPresented: Binding(get: { app.isLoginPresented },
+                                    set: { app.isLoginPresented = $0 })) { GeminiLoginSheet() }
         .task {
             if app.gemini.signInState == .unknown {
                 _ = await app.gemini.refreshSession()
@@ -56,7 +56,7 @@ struct SettingsView: View {
                     }
                 }
             } else {
-                Button("Войти в Gemini") { showingLogin = true }
+                Button("Войти в Gemini") { app.isLoginPresented = true }
             }
             if let error = app.gemini.lastError {
                 Text(error).font(.footnote).foregroundStyle(Theme.danger)

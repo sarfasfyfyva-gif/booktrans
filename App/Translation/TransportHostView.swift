@@ -24,18 +24,29 @@ struct TransportHostView: UIViewRepresentable {
     func makeUIView(context: Context) -> UIView {
         let host = UIView(frame: .zero)
         host.backgroundColor = .clear
-        host.addSubview(webView)
-        Self.pin(webView, to: host)
+        guard claimsOwnership else { return host }
+        Self.attach(webView, to: host)
         webView.isUserInteractionEnabled = interactive
         return host
     }
 
     func updateUIView(_ host: UIView, context: Context) {
+        // A host that is not the owner must not touch the WebView at all — not even
+        // its interaction flag. Setting that flag here is what broke sign-in: the
+        // 1x1 host re-renders whenever any app state changes, so it kept clearing the
+        // flag the presented sheet had just set, and the sign-in page stayed fully
+        // visible while ignoring every tap.
+        guard claimsOwnership else { return }
+        if webView.superview !== host {
+            Self.attach(webView, to: host)
+        }
         webView.isUserInteractionEnabled = interactive
-        guard claimsOwnership, webView.superview !== host else { return }
-        webView.removeFromSuperview()
-        host.addSubview(webView)
-        Self.pin(webView, to: host)
+    }
+
+    private static func attach(_ child: UIView, to parent: UIView) {
+        child.removeFromSuperview()
+        parent.addSubview(child)
+        pin(child, to: parent)
     }
 
     private static func pin(_ child: UIView, to parent: UIView) {
@@ -97,18 +108,21 @@ struct GeminiLoginSheet: View {
                         .disabled(isWorking)
                     }
                 }
-                .onAppear {
-                    app.isLoginPresented = true
+                .task {
                     // Only load the page if the transport is not already sitting on
                     // it: reloading would throw away the page the user just signed
                     // in on.
-                    Task {
-                        if !(app.gemini.transport.currentURL?.contains("gemini.google.com") ?? false) {
-                            try? await app.gemini.transport.load(app.gemini.config.appURL)
-                        }
+                    if !(app.gemini.transport.currentURL?.contains("gemini.google.com") ?? false) {
+                        try? await app.gemini.transport.load(app.gemini.config.appURL)
                     }
                 }
-                .onDisappear { app.isLoginPresented = false }
+                .onDisappear {
+                    // Release the WebView back to the 1x1 host. The sheet is presented
+                    // by this same flag, so the ordinary dismissal path has already
+                    // cleared it; this guarantees the release on every path, because
+                    // the 1x1 host is what keeps the page (and its session) alive.
+                    app.isLoginPresented = false
+                }
         }
     }
 }

@@ -12,7 +12,6 @@ struct BookView: View {
     @State private var plan: BatchPlan?
     @State private var translations = TranslationMap()
     @State private var readingChapter: Int?
-    @State private var showingLogin = false
 
     var body: some View {
         List {
@@ -28,7 +27,11 @@ struct BookView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { reload() }
         .onChange(of: app.translationRevision) { _, _ in reload() }
-        .sheet(isPresented: $showingLogin) { GeminiLoginSheet() }
+        // Presented by the same flag the transport host uses to decide who owns the
+        // WebView: presenting and handing over have to happen in one update, or the
+        // 1x1 host can reclaim the page between the two and the sheet comes up empty.
+        .sheet(isPresented: Binding(get: { app.isLoginPresented },
+                                    set: { app.isLoginPresented = $0 })) { GeminiLoginSheet() }
         .navigationDestination(isPresented: Binding(
             get: { readingChapter != nil },
             set: { if !$0 { readingChapter = nil } })) {
@@ -76,7 +79,7 @@ struct BookView: View {
                     case .waitingAuth:
                         statusRow(spinner: false)
                         Button {
-                            showingLogin = true
+                            app.isLoginPresented = true
                         } label: {
                             Label("Войти в Gemini",
                                   systemImage: "person.crop.circle.badge.exclamationmark")
