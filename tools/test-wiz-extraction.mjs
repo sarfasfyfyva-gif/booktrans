@@ -61,6 +61,11 @@ async function extract(name, env) {
   return parsed;
 }
 
+// Exactly what gemini.google.com/app serves as of September 2026: the build and
+// session ids a request needs, and no SNlM0e at all. This fixture is the regression
+// — every other one here carries the token, which is why requiring it went unnoticed.
+const WIZ_NO_TOKEN = 'window.WIZ_global_data = {"cfb2h":"boq_build_20260910","FdrFJe":"8378702705255365122","TuX5cc":"en-US"};';
+
 const WIZ = 'window.WIZ_global_data = {"SNlM0e":"ATTOKEN123","cfb2h":"boq_build_1",'
   + '"FdrFJe":"1234567890","TuX5cc":"ru"};';
 
@@ -72,7 +77,10 @@ const results = [
     scripts: ['var x = "{\\"SNlM0e\\":\\"ATTOKEN123\\",\\"cfb2h\\":\\"boq_build_1\\",\\"FdrFJe\\":\\"1234567890\\"}"'] }))],
   ["refetch", await extract("refetch", environment({
     html: "<html>signed out</html>", fetched: `<script>${WIZ}</script>` }))],
-  ["partial", await extract("partial", environment({ global: { SNlM0e: "ATTOKEN123" } }))],
+  ["no token", await extract("no-token", environment({ global: {
+    cfb2h: "boq_build_20260910", FdrFJe: "8378702705255365122", TuX5cc: "en-US" } }))],
+  ["no token on page", await extract("no-tok-html", environment({ html: WIZ_NO_TOKEN }))],
+  ["token only", await extract("token-only", environment({ global: { SNlM0e: "ATTOKEN123" } }))],
   ["signed out", await extract("signedout", environment({ html: "<html>no tokens</html>" }))],
 ];
 
@@ -80,8 +88,13 @@ const expectations = {
   global: (r) => r.source === "WIZ_global_data" && r.at === "ATTOKEN123",
   "inline script": (r) => r.source === "inline-script" && r.bl === "boq_build_1",
   "escaped json": (r) => r.source === "inline-script" && r.at === "ATTOKEN123",
+  // The regression: a page with no token must still yield a usable session.
+  "no token": (r) => r.source === "WIZ_global_data" && r.bl === "boq_build_20260910"
+    && r.sid === "8378702705255365122" && r.at === "",
+  "no token on page": (r) => r.bl === "boq_build_20260910" && r.at === "",
+  // And the inverse: a token with nothing to build a request from is not a session.
+  "token only": (r) => r.bl === "" && r.sid === "",
   refetch: (r) => r.source === "refetch" && r.sid === "1234567890",
-  partial: (r) => r.at === "ATTOKEN123" && r.bl === "",
   "signed out": (r) => r.at === "" && r.mentionsAt === false,
 };
 

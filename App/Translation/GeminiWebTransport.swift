@@ -113,19 +113,18 @@ final class GeminiWebTransport {
           for (const role in names) { out[role] = grab(text, names[role]); }
           return out;
         };
-        const complete = (value) => value && value.at && value.build && value.session;
-        // `at` alone still makes the session usable; `bl` and `f.sid` only ride
-        // along in the request, so a partial find beats no find.
-        const partial = (value) => value && value.at;
+        // What makes a find usable is what a request needs: `bl` and `f.sid`.
+        // The anti-CSRF token is not part of this, in either direction: Google
+        // stopped serving it in the /app HTML in early 2026, so requiring it threw
+        // away a perfectly good session and reported a signed-in user as a guest.
+        // A token on its own is not usable either, since no request can be built.
+        const usable = (value) => Boolean(value && value.build && value.session);
 
         let result = {};
         let source = "";
-        let fallback = {};
-        let fallbackSource = "";
         const remember = (value, name) => {
-          if (complete(value)) { result = value; source = name; return true; }
-          if (partial(value) && !fallback.at) { fallback = value; fallbackSource = name; }
-          return false;
+          if (!usable(value)) { return false; }
+          result = value; source = name; return true;
         };
 
         // 1. the global the app itself uses
@@ -140,20 +139,20 @@ final class GeminiWebTransport {
         }
 
         // 2. every inline script, in document order
-        if (!complete(result)) {
+        if (!usable(result)) {
           for (const script of Array.from(document.scripts || [])) {
             if (remember(fromText(script.textContent), "inline-script")) { break; }
           }
         }
 
         // 3. the document itself
-        if (!complete(result)) {
+        if (!usable(result)) {
           remember(fromText(document.documentElement ? document.documentElement.innerHTML : ""),
                    "document-html");
         }
 
         // 4. ask the server again, with the session cookies the page holds
-        if (!complete(result)) {
+        if (!usable(result)) {
           try {
             const response = await fetch(location.origin + "/app",
                                          { credentials: "include", redirect: "follow" });
@@ -163,10 +162,9 @@ final class GeminiWebTransport {
           }
         }
 
-        if (!complete(result) && fallback.at) { result = fallback; source = fallbackSource; }
-
         // Diagnostics for the case where nothing was found: enough to tell an
-        // unauthenticated page from a page whose parameters moved.
+        // unauthenticated page from a page whose parameters moved, plus whether the
+        // optional token was on it, which explains the absence of `at` above.
         const html = document.documentElement ? document.documentElement.innerHTML : "";
         const page = String(html);
         return JSON.stringify({

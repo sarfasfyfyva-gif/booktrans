@@ -29,10 +29,24 @@ jobs:
       - name: swift test (BookTransCore)
         run: swift test --package-path Packages/BookTransCore
 
+  # The extraction script is JavaScript inside a Swift string: `swift test` cannot
+  # see it and the compiler cannot type-check it, so it had no gate at all. It is the
+  # one thing that decides whether the app can translate, and it has now failed twice
+  # in ways nothing else could catch — once by losing a backslash, once by requiring
+  # the anti-CSRF token Google stopped serving. It cost a device round trip both
+  # times; it costs a fifth of a second here.
+  harness:
+    name: WIZ extraction harness
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: node tools/test-wiz-extraction.mjs
+        run: node tools/test-wiz-extraction.mjs
+
   ios:
     name: iOS build + IPA
     runs-on: macos-26
-    needs: core
+    needs: [core, harness]
     steps:
       - uses: actions/checkout@v7
 
