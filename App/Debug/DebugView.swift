@@ -74,12 +74,30 @@ struct DebugView: View {
 
     private var wizSection: some View {
         Section {
+            // The first thing to read when the app says it is not signed in: it
+            // separates "the login never reached this app" from "the session is
+            // here but the page did not give up its parameters".
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: app.gemini.signInState == .signedIn
+                      ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(app.gemini.signInState == .signedIn
+                                     ? Theme.success : Theme.warning)
+                Text(app.gemini.sessionDiagnosis)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.primaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            LabeledRow("Cookies Google",
+                       app.gemini.authCookieNames.isEmpty
+                       ? "нет"
+                       : app.gemini.authCookieNames.joined(separator: ", "))
             if let wiz = app.gemini.wiz {
                 LabeledRow("at (\(app.gemini.config.wizAt))",
                            showsWizSecrets ? wiz.at : WizParameters.mask(wiz.at))
                 LabeledRow("bl (\(app.gemini.config.wizBuild))", wiz.bl)
                 LabeledRow("f.sid (\(app.gemini.config.wizSession))", wiz.sessionId)
                 LabeledRow("hl (\(app.gemini.config.wizLang))", wiz.language)
+                LabeledRow("Источник параметров", wiz.source)
             } else {
                 Text("Параметры не прочитаны").foregroundStyle(Theme.secondaryText)
             }

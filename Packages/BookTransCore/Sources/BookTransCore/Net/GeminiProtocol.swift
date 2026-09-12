@@ -216,6 +216,11 @@ public enum GeminiConfigLoader {
 
 /// `window.WIZ_global_data` values scraped from the Gemini app page.
 public struct WizParameters: Codable, Sendable, Equatable {
+    /// Where the values were found on the page ("WIZ_global_data", "inline-script",
+    /// "document-html", "refetch"), or "none". Diagnostics only: it is what tells
+    /// an unauthenticated page apart from one whose parameters have moved.
+    public var source: String
+
     /// `SNlM0e` — the anti-CSRF token; its absence means "not signed in".
     public var at: String
     /// `cfb2h` — client build label.
@@ -225,17 +230,20 @@ public struct WizParameters: Codable, Sendable, Equatable {
     /// `TuX5cc` — UI language.
     public var language: String
 
-    public init(at: String, bl: String, sessionId: String, language: String = "ru") {
+    public init(at: String, bl: String, sessionId: String, language: String = "ru",
+                source: String = "none") {
         self.at = at
         self.bl = bl
         self.sessionId = sessionId
         self.language = language
+        self.source = source
     }
 
     public var isSignedIn: Bool { !at.isEmpty }
 
     public var maskedDescription: String {
-        "at=\(WizParameters.mask(at)) bl=\(bl) f.sid=\(sessionId) hl=\(language)"
+        "at=\(WizParameters.mask(at)) bl=\(bl) f.sid=\(sessionId) hl=\(language) "
+            + "source=\(source)"
     }
 
     /// Shows just enough of a secret to tell two values apart.

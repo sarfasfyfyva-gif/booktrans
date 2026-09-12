@@ -74,61 +74,141 @@ final class GeminiWebTransport {
 
     // MARK: - Session parameters
 
-    /// Reads `window.WIZ_global_data`, falling back to scraping the HTML for the
-    /// parameter literals when the global is not populated.
+    /// Reads the session parameters the page uses for its own requests.
+    ///
+    /// Four strategies, in order, because this single call decides whether the app
+    /// can translate at all and each one has failed in the wild for a different
+    /// reason:
+    ///
+    /// 1. `window.WIZ_global_data` — how the app itself reads them;
+    /// 2. a scan of the inline scripts, where the same values also appear;
+    /// 3. a scan of the document HTML;
+    /// 4. a fresh same-origin `fetch` of the page, because the bootstrapped
+    ///    document can be served without the parameters while the server-rendered
+    ///    one always carries them.
+    ///
+    /// The key names are interpolated into the script rather than passed as
+    /// `callAsyncJavaScript` arguments: the binding of named arguments is one
+    /// more thing that can silently differ, and these are static configuration
+    /// strings, not secrets.
     func readWizParameters(config: GeminiConfig) async throws -> WizParameters {
-        // `callAsyncJavaScript` binds each dictionary key as a *named* parameter
-        // of the generated function, so the names below must match the argument
-        // keys exactly. (`arguments[0]` does not exist here: the body runs inside
-        // an arrow function, which has no `arguments` binding of its own.)
         let script = """
-        const g = window.WIZ_global_data || {};
-        const pick = (name) => {
-          const value = g[name];
-          return (typeof value === "string") ? value : "";
+        const names = { at: "\(config.wizAt)", build: "\(config.wizBuild)",
+                        session: "\(config.wizSession)", lang: "\(config.wizLang)" };
+
+        // Inline data is JSON embedded in a script, so its quotes may be escaped
+        // as \" . The backslash is built from its char code: written literally it
+        // has to survive Swift's own unescaping as well as JavaScript's, and one
+        // layer too few turns the pattern into a no-op that silently matches
+        // nothing.
+        const ESCAPED_QUOTE = String.fromCharCode(92) + '"';
+        const plain = (text) => String(text || "").split(ESCAPED_QUOTE).join('"');
+        const grab = (text, name) => {
+          if (!text) { return ""; }
+          const m = plain(text).match(new RegExp('"' + name + '"\\s*:\\s*"([^"]*)"'));
+          return m ? m[1] : "";
         };
-        let at = pick(keys.at), bl = pick(keys.build), sid = pick(keys.session), hl = pick(keys.lang);
-        if (!at || !bl || !sid) {
-          const html = document.documentElement ? document.documentElement.innerHTML : "";
-          const scrape = (name) => {
-            const m = html.match(new RegExp('"' + name + '":"([^"]*)"'));
-            return m ? m[1] : "";
-          };
-          at = at || scrape(keys.at);
-          bl = bl || scrape(keys.build);
-          sid = sid || scrape(keys.session);
-          hl = hl || scrape(keys.lang);
+        const fromText = (text) => {
+          const out = {};
+          for (const role in names) { out[role] = grab(text, names[role]); }
+          return out;
+        };
+        const complete = (value) => value && value.at && value.build && value.session;
+        // `at` alone still makes the session usable; `bl` and `f.sid` only ride
+        // along in the request, so a partial find beats no find.
+        const partial = (value) => value && value.at;
+
+        let result = {};
+        let source = "";
+        let fallback = {};
+        let fallbackSource = "";
+        const remember = (value, name) => {
+          if (complete(value)) { result = value; source = name; return true; }
+          if (partial(value) && !fallback.at) { fallback = value; fallbackSource = name; }
+          return false;
+        };
+
+        // 1. the global the app itself uses
+        const global = window.WIZ_global_data;
+        if (global) {
+          const out = {};
+          for (const role in names) {
+            const value = global[names[role]];
+            out[role] = (typeof value === "string") ? value : "";
+          }
+          remember(out, "WIZ_global_data");
         }
-        const title = document.title || "";
-        return JSON.stringify({ at, bl, sid, hl, title, href: location.href });
+
+        // 2. every inline script, in document order
+        if (!complete(result)) {
+          for (const script of Array.from(document.scripts || [])) {
+            if (remember(fromText(script.textContent), "inline-script")) { break; }
+          }
+        }
+
+        // 3. the document itself
+        if (!complete(result)) {
+          remember(fromText(document.documentElement ? document.documentElement.innerHTML : ""),
+                   "document-html");
+        }
+
+        // 4. ask the server again, with the session cookies the page holds
+        if (!complete(result)) {
+          try {
+            const response = await fetch(location.origin + "/app",
+                                         { credentials: "include", redirect: "follow" });
+            remember(fromText(await response.text()), "refetch");
+          } catch (error) {
+            if (!source) { source = "refetch-failed"; }
+          }
+        }
+
+        if (!complete(result) && fallback.at) { result = fallback; source = fallbackSource; }
+
+        // Diagnostics for the case where nothing was found: enough to tell an
+        // unauthenticated page from a page whose parameters moved.
+        const html = document.documentElement ? document.documentElement.innerHTML : "";
+        const page = String(html);
+        return JSON.stringify({
+          at: result.at || "", bl: result.build || "", sid: result.session || "",
+          hl: result.lang || "", source: source,
+          href: location.href, title: document.title || "",
+          htmlLength: page.length,
+          mentionsAt: page.indexOf(names.at) >= 0,
+          mentionsBuild: page.indexOf(names.build) >= 0
+        });
         """
-        let arguments: [String: Any] = [
-            "keys": [
-                "at": config.wizAt,
-                "build": config.wizBuild,
-                "session": config.wizSession,
-                "lang": config.wizLang,
-            ]
-        ]
-        let result = try await evaluate(script, arguments: arguments)
+        let result = try await evaluate(script, arguments: [:])
         guard let text = result as? String,
               let data = text.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: String]
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else {
             throw TransportError.badScriptResult
         }
+        func string(_ key: String) -> String { object[key] as? String ?? "" }
+
         let params = WizParameters(
-            at: object["at"] ?? "",
-            bl: object["bl"] ?? "",
-            sessionId: object["sid"] ?? "",
-            language: (object["hl"]?.isEmpty == false ? object["hl"]! : "ru"))
-        LogStore.shared.append(level: .info, event: "wiz.read", fields: [
-            "signedIn": params.isSignedIn ? "1" : "0",
-            "bl": params.bl,
-            "href": object["href"] ?? "",
-        ])
-        if !params.at.isEmpty {
+            at: string("at"),
+            bl: string("bl"),
+            sessionId: string("sid"),
+            language: string("hl").isEmpty ? "ru" : string("hl"),
+            source: string("source").isEmpty ? "none" : string("source"))
+        if params.isSignedIn {
             LogStore.shared.registerSecret(params.at)
+        }
+        LogStore.shared.append(level: params.isSignedIn ? .info : .warn, event: "wiz.read", fields: [
+            "signedIn": params.isSignedIn ? "1" : "0",
+            "source": string("source"),
+            "bl": params.bl,
+            "sid": params.sessionId,
+            "href": string("href"),
+            "title": string("title"),
+            "htmlLength": String(object["htmlLength"] as? Int ?? 0),
+            "mentionsAt": (object["mentionsAt"] as? Bool) == true ? "1" : "0",
+            "mentionsBuild": (object["mentionsBuild"] as? Bool) == true ? "1" : "0",
+        ])
+        if !params.isSignedIn {
+            CoreLog.warn("WIZ parameters not found on \(string("href")) (\(string("source")))")
         }
         return params
     }

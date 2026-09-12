@@ -27,6 +27,36 @@ final class GeminiSession {
     /// Raw `qpEbW` payloads keyed by `flash` / `pro`.
     private(set) var quotaPayloads: [String: String] = [:]
 
+    /// Google cookies actually present in the app's own WebView store.
+    ///
+    /// This is the fact that separates the two ways sign-in can appear to work
+    /// and still leave the app anonymous: if these are missing, the login never
+    /// reached this app's cookie store; if they are present but `at` is empty, the
+    /// session exists and the parameters simply were not found on the page.
+    private(set) var authCookieNames: [String] = []
+
+    private static let authCookieCandidates = [
+        "__Secure-1PSID", "__Secure-1PSIDTS", "__Secure-3PSID",
+        "SID", "HSID", "SSID", "APISID", "SAPISID",
+    ]
+
+    /// Where the session parameters were found on the page; "none" when they
+    /// were not.
+    private(set) var wizSource = "—"
+
+    var hasAuthCookies: Bool { !authCookieNames.isEmpty }
+
+    /// A one-line answer to "why can't the app sign in", for the diagnostics screen.
+    var sessionDiagnosis: String {
+        if signInState == .signedIn { return "сессия активна" }
+        if !hasAuthCookies {
+            return "в хранилище приложения нет cookies Google — вход не доведён до конца "
+                + "или выполнен в другом браузере"
+        }
+        return "cookies Google есть, но параметры сессии не найдены на странице "
+            + "(источник: \(wizSource))"
+    }
+
     /// Selected model id; falls back to the configured default.
     var selectedModelId: String {
         didSet { UserDefaults.standard.set(selectedModelId, forKey: Self.modelDefaultsKey) }
@@ -146,7 +176,18 @@ final class GeminiSession {
             wiz = parameters
             lastWizRefresh = Date()
             signInState = parameters.isSignedIn ? .signedIn : .signedOut
-            lastError = signInState == .signedOut ? "Нужно войти в Gemini." : nil
+
+            // Record what the app's own cookie store holds. Logged by name only:
+            // values never leave WebKit.
+            let names = Set((await transport.cookies()).map(\.name))
+            authCookieNames = GeminiSession.authCookieCandidates.filter { names.contains($0) }
+            wizSource = parameters.source
+            LogStore.shared.append(level: .info, event: "session.cookies", fields: [
+                "present": authCookieNames.joined(separator: ","),
+                "count": String(authCookieNames.count),
+            ])
+
+            lastError = signInState == .signedOut ? sessionDiagnosis : nil
             return parameters.isSignedIn
         } catch {
             signInState = .unknown
