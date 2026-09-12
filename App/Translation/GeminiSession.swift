@@ -227,7 +227,13 @@ final class GeminiSession {
                 "cookies": authCookieNames.joined(separator: ","),
             ])
 
-            lastError = signInState == .signedOut ? sessionDiagnosis : nil
+            guard signInState == .signedIn else {
+                lastError = sessionDiagnosis
+                return false
+            }
+            // Local evidence is necessary but not sufficient: the account RPC is
+            // what actually confirms the session works.
+            await refreshAccountStatus()
             return signInState == .signedIn
         } catch {
             signInState = .unknown
@@ -303,25 +309,40 @@ final class GeminiSession {
     }
 
     /// `otAQ7b` on `/app`: account status and the authoritative model list.
+    /// `otAQ7b` on `/app`: account state and the authoritative model list.
+    ///
+    /// This is the confirmation that the session really works, which is why it is
+    /// the last thing `refreshSession` does. The token's presence cannot serve that
+    /// purpose: Google stopped serving `SNlM0e` in early 2026, and the sign-in page
+    /// carries one of its own, so it is wrong in both directions.
     func refreshAccountStatus() async {
         do {
             let value = try await batchExec(rpcId: config.rpcStatus, payload: "[]", sourcePath: .app)
             let status = GeminiResponseParser.parseAccountStatus(value, presets: config.models)
             account = status
             models = mergedModels(rpc: status.models, presets: config.models)
-            if let error = status.error {
-                lastError = error.message
-                if error.kind == .unauthenticated { signInState = .signedOut }
-            } else {
+
+            if status.isUsable {
                 signInState = .signedIn
                 lastError = nil
+            } else if status.code == .unauthenticated {
+                signInState = .signedOut
+                lastError = status.error?.message
+            } else {
+                // The login itself is fine; the account is restricted. Say which
+                // restriction, and leave the state alone rather than claiming the
+                // user is signed out when they are not.
+                lastError = status.error?.message
             }
-            LogStore.shared.append(level: .info, event: "rpc.status", fields: [
+            LogStore.shared.append(level: status.isUsable ? .info : .warn, event: "rpc.status", fields: [
                 "code": String(status.statusCode ?? -1),
+                "usable": status.isUsable ? "1" : "0",
                 "models": String(status.models.count),
                 "tier": String(status.tierRaw ?? -1),
             ])
         } catch {
+            // A failed RPC says nothing about the session, so it must not change
+            // the state — only report why the check could not run.
             lastError = (error as? LocalizedError)?.errorDescription ?? "\(error)"
             LogStore.shared.append(level: .warn, event: "rpc.status failed", fields: ["error": "\(error)"])
         }

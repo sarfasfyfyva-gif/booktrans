@@ -73,8 +73,9 @@ struct GeminiLoginSheet: View {
                         Button {
                             Task {
                                 isWorking = true
-                                let ok = await app.gemini.refreshSession(force: true)
-                                if ok { await app.gemini.refreshAccountStatus() }
+                                // refreshSession already confirms with the account
+                                // RPC, so the result it reports is the checked one.
+                                _ = await app.gemini.refreshSession(force: true)
                                 isWorking = false
                                 if app.gemini.signInState == .signedIn {
                                     if app.queue.status == .waitingAuth,

@@ -217,8 +217,13 @@ struct DebugView: View {
 
     private func refreshAll() async {
         isBusy = true
-        _ = await app.gemini.refreshSession(force: app.gemini.wiz == nil)
-        await app.gemini.refreshAccountStatus()
+        let signedIn = await app.gemini.refreshSession(force: app.gemini.wiz == nil)
+        if !signedIn {
+            // refreshSession confirms with the account RPC only when the local
+            // checks pass; the diagnostics screen wants the raw answer either way,
+            // because that answer is what explains a failure.
+            await app.gemini.refreshAccountStatus()
+        }
         cookies = await app.gemini.transport.cookies()
         isBusy = false
     }

@@ -76,8 +76,9 @@ struct SettingsView: View {
             Button("Обновить список моделей") {
                 Task {
                     isRefreshing = true
-                    _ = await app.gemini.refreshSession()
-                    await app.gemini.refreshAccountStatus()
+                    // Refreshing the session re-reads the account, which is where
+                    // the model list comes from.
+                    _ = await app.gemini.refreshSession(force: true)
                     isRefreshing = false
                 }
             }
@@ -183,7 +184,6 @@ struct SettingsView: View {
     private func refreshSession() async {
         isRefreshing = true
         let ok = await app.gemini.refreshSession(force: true)
-        if ok { await app.gemini.refreshAccountStatus() }
         isRefreshing = false
         if ok {
             // A waiting queue can carry on now that the session works again.
