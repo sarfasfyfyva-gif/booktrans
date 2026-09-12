@@ -55,8 +55,17 @@ struct DebugView: View {
             .disabled(app.gemini.lastGeneration == nil)
 
             Button("Скопировать лог") {
-                UIPasteboard.general.string = LogStore.shared.fullText()
-                app.show("Журнал скопирован в буфер")
+                // The tail, not the file: it is what fits in a message and what
+                // describes the attempt that just failed. The whole file goes through
+                // the share sheet below.
+                UIPasteboard.general.string = LogStore.shared.tail(200).joined(separator: "\n")
+                app.show("Последние записи журнала скопированы")
+            }
+
+            if let url = LogStore.shared.shareURL {
+                ShareLink(item: url) {
+                    Label("Отправить файл журнала", systemImage: "square.and.arrow.up")
+                }
             }
 
             if let result = smokeTestResult {

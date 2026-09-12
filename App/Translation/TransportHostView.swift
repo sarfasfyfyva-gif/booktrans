@@ -20,13 +20,15 @@ struct TransportHostView: UIViewRepresentable {
     /// not pull it back on some unrelated re-render, or the page the user is
     /// signing in on would vanish mid-flow.
     var claimsOwnership: Bool = true
+    /// Names this host in the log, so one session's history shows which host held the
+    /// WebView, whether it was interactive while it did, and how big it was.
+    var role: String = "background"
 
     func makeUIView(context: Context) -> UIView {
         let host = UIView(frame: .zero)
         host.backgroundColor = .clear
         guard claimsOwnership else { return host }
-        Self.attach(webView, to: host)
-        webView.isUserInteractionEnabled = interactive
+        claim(host)
         return host
     }
 
@@ -37,10 +39,26 @@ struct TransportHostView: UIViewRepresentable {
         // flag the presented sheet had just set, and the sign-in page stayed fully
         // visible while ignoring every tap.
         guard claimsOwnership else { return }
+        // Only an actual handover is acted on, so the flag is set exactly when this
+        // host takes the WebView — never on an unrelated re-render, which is what
+        // used to leave the sign-in page alive to the eye and deaf to touch.
         if webView.superview !== host {
-            Self.attach(webView, to: host)
+            claim(host)
         }
+    }
+
+    /// Takes the WebView and records what state it was taken in. A sign-in page that
+    /// is visible but answers no taps is exactly the case this line is meant to rule
+    /// in or out from the log alone.
+    private func claim(_ host: UIView) {
+        Self.attach(webView, to: host)
         webView.isUserInteractionEnabled = interactive
+        LogStore.shared.append(level: .info, event: "webview.claimed", fields: [
+            "role": role,
+            "interactive": interactive ? "1" : "0",
+            "inWindow": webView.window != nil ? "1" : "0",
+            "size": "\(Int(webView.bounds.width))x\(Int(webView.bounds.height))",
+        ])
     }
 
     private static func attach(_ child: UIView, to parent: UIView) {
@@ -72,7 +90,8 @@ struct GeminiLoginSheet: View {
 
     var body: some View {
         NavigationStack {
-            TransportHostView(webView: app.gemini.transport.webView, interactive: true)
+            TransportHostView(webView: app.gemini.transport.webView, interactive: true,
+                              role: "sheet")
                 .background(Theme.background)
                 .navigationTitle("Вход в Gemini")
                 .navigationBarTitleDisplayMode(.inline)
@@ -109,6 +128,7 @@ struct GeminiLoginSheet: View {
                     }
                 }
                 .task {
+                    LogStore.shared.append(level: .info, event: "login.opened")
                     // Only load the page if the transport is not already sitting on
                     // it: reloading would throw away the page the user just signed
                     // in on.
@@ -117,6 +137,7 @@ struct GeminiLoginSheet: View {
                     }
                 }
                 .onDisappear {
+                    LogStore.shared.append(level: .info, event: "login.closed")
                     // Release the WebView back to the 1x1 host. The sheet is presented
                     // by this same flag, so the ordinary dismissal path has already
                     // cleared it; this guarantees the release on every path, because

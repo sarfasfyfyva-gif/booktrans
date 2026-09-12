@@ -113,6 +113,13 @@ final class LogStore: @unchecked Sendable {
 
     // MARK: - Reading
 
+    /// The log file itself, for handing to a share sheet. The file is what makes the
+    /// log reachable at all: it sits in `Documents`, which is exposed to the Files
+    /// app, so a device with no cable attached can still send it.
+    var shareURL: URL? {
+        queue.sync { fileURL }
+    }
+
     /// Last `count` lines, newest last. Used by the debug screen.
     func tail(_ count: Int = 200) -> [String] {
         queue.sync {
