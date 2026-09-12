@@ -375,8 +375,6 @@ enum TransportError: LocalizedError {
     }
 }
 
-/// Bridges `WKNavigationDelegate` callbacks into async continuations.
-@MainActor
 /// Keeps the user's page usable during sign-in.
 ///
 /// The delegate's job is the popup case: WebKit refuses to open a new window unless
@@ -415,6 +413,8 @@ private final class InteractionDelegate: NSObject, WKUIDelegate {
     }
 }
 
+/// Bridges `WKNavigationDelegate` callbacks into async continuations.
+@MainActor
 private final class NavigationDelegate: NSObject, WKNavigationDelegate {
     private var continuation: CheckedContinuation<Void, Error>?
 
